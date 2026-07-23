@@ -1,0 +1,9 @@
+.ucrm-shell {
+  display: flex;
+  height: 100vh;
+  width: 100%;
+}
+.ucrm-main {
+  flex: 1;
+  overflow-y: auto;
+}
