@@ -15,9 +15,9 @@ VMM is present as a placeholder stub only — all real VMM work lives in `../vmm
 | Shell | `src/App.jsx`, `src/components/ProjectRail.jsx` |
 | Admin pages | `src/admin/` (Users, Picklists, Dependencies — shared across projects) |
 | Contexts | `src/context/` |
-| n8n workflows | `../PSRI/Workflows/*.json` (sibling folder — not in this repo) |
-| Process doc | `../PSRI/PSRI_PROCESS.md` — full data model, module specs, lessons |
-| Supabase schema | `../PSRI/supabase_schema.sql` |
+| n8n workflows | `PSRI/Workflows/*.json` |
+| Process doc | `PSRI/PSRI_PROCESS.md` — full data model, module specs, lessons |
+| Supabase schema | `PSRI/supabase_schema.sql` |
 
 ## Backend
 
