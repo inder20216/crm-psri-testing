@@ -109,7 +109,7 @@ function AppShell() {
         <DependenciesProvider>
           <SpecialtySummariesProvider>
             <GuidanceProvider>
-              <BrowserRouter>
+              <BrowserRouter basename={import.meta.env.BASE_URL}>
                 <div className="ucrm-shell">
                   <ProjectRail />
                   <Routes>
