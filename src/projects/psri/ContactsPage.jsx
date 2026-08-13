@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { COUNTRIES, findCountry } from '../../data/countries';
 import { INDIA_STATES, INDIA_STATE_NAMES } from '../../data/indiaStates';
 import { useUsers } from '../../context/UsersContext';
@@ -74,27 +74,25 @@ export default function ContactsPage() {
 
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(''), 2500); };
 
-  const refresh = useCallback(() => {
+  // Server-side search — the 50-contact "recent" view is just the default
+  // (149k+ contacts is too many to load unfiltered), but any search term
+  // queries the full table via the backend, not just the loaded page.
+  const refresh = useCallback((q) => {
     setLoading(true);
     setLoadErr('');
-    return psri.getContacts()
+    return psri.getContacts(q)
       .then(res => setContacts(res.contacts || []))
       .catch(() => setLoadErr('Could not load contacts. Please try again.'))
       .finally(() => setLoading(false));
   }, []);
 
-  useEffect(() => { refresh(); }, [refresh]);
+  useEffect(() => {
+    const q = query.trim();
+    const timer = setTimeout(() => refresh(q), q ? 300 : 0);
+    return () => clearTimeout(timer);
+  }, [query, refresh]);
 
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return contacts;
-    return contacts.filter(c =>
-      c.name.toLowerCase().includes(q) ||
-      c.mobile.includes(q) ||
-      (c.altMobile || '').includes(q) ||
-      (c.email || '').toLowerCase().includes(q)
-    );
-  }, [contacts, query]);
+  const filtered = contacts;
 
   const openNew = () => { setForm(emptyForm); setErrors({}); setSaveErr(''); setShowForm(true); };
   const openEdit = (c) => { setForm(c); setErrors({}); setSaveErr(''); setShowForm(true); };
@@ -133,7 +131,7 @@ export default function ContactsPage() {
         await psri.addContact(cleaned);
         showToast('Contact created');
       }
-      await refresh();
+      await refresh(query.trim());
       setShowForm(false);
       setSelected(null);
     } catch (err) {

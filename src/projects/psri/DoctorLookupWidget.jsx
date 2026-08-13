@@ -5,6 +5,7 @@ import './Psri.css';
 function DoctorSearchTab() {
   const [query, setQuery]         = useState('');
   const [results, setResults]     = useState([]);
+  const [fuzzyMatch, setFuzzyMatch] = useState(false);
   const [searching, setSearching] = useState(false);
   const [searchErr, setSearchErr] = useState('');
   const [activeDoctor, setActiveDoctor] = useState(null);
@@ -12,12 +13,12 @@ function DoctorSearchTab() {
 
   useEffect(() => {
     clearTimeout(debounceRef.current);
-    if (!query.trim()) { setResults([]); setSearchErr(''); return; }
+    if (!query.trim()) { setResults([]); setFuzzyMatch(false); setSearchErr(''); return; }
     debounceRef.current = setTimeout(() => {
       setSearching(true);
       setSearchErr('');
       psri.searchDoctors(query.trim(), 'doctor')
-        .then(res => setResults(res.results || []))
+        .then(res => { setResults(res.results || []); setFuzzyMatch(!!res.fuzzyMatch); })
         .catch(() => setSearchErr('Could not search doctors. Please try again.'))
         .finally(() => setSearching(false));
     }, 400);
@@ -38,6 +39,9 @@ function DoctorSearchTab() {
       {searchErr && <p className="psri-err-msg">{searchErr}</p>}
       {!searching && !activeDoctor && query.trim() && results.length === 0 && !searchErr && (
         <p className="cp-hint">No matches found.</p>
+      )}
+      {!activeDoctor && fuzzyMatch && results.length > 0 && (
+        <p className="cp-hint">No exact match for "{query.trim()}" — showing closest matches:</p>
       )}
       {!activeDoctor && results.length > 0 && (
         <div className="psri-side-results">
@@ -105,22 +109,36 @@ function SpecialtySearchTab() {
       )}
 
       {result && !activeDoctor && (
-        <div className="psri-specialty-group">
-          <div className="psri-specialty-group-title">{result.specialty}</div>
-          <div className="psri-lang-toggle">
-            <button type="button" className={lang === 'en' ? 'active' : ''} onClick={() => setLang('en')}>English</button>
-            <button type="button" className={lang === 'hi' ? 'active' : ''} onClick={() => setLang('hi')}>हिन्दी</button>
-          </div>
-          <p className="psri-specialty-info-text">{String(lang === 'en' ? (result.summaryEn || '') : (result.summaryHi || '')) || 'No AI summary available yet.'}</p>
-          <div className="psri-side-results">
-            {(result.doctors || []).length === 0 && <p className="cp-hint">No doctors currently listed for this specialty.</p>}
-            {(result.doctors || []).map((r, i) => (
-              <div key={i} className="psri-side-result-item" onClick={() => setActiveDoctor(r)}>
-                <strong>{r.doctorName || '(unnamed)'}</strong>
+        <>
+          {result.fuzzyMatch && (
+            <p className="cp-hint">No exact match for "{query.trim()}" — showing closest specialty:</p>
+          )}
+          {(result.groups || []).length > 1 && (
+            <p className="cp-hint">"{query.trim()}" matches {result.groups.length} specialties:</p>
+          )}
+          {(result.groups || []).map((g, gi) => (
+            <div className="psri-specialty-group" key={gi}>
+              <div className="psri-specialty-group-title">{g.specialty}</div>
+              {(g.summaryEn || g.summaryHi) && (
+                <>
+                  <div className="psri-lang-toggle">
+                    <button type="button" className={lang === 'en' ? 'active' : ''} onClick={() => setLang('en')}>English</button>
+                    <button type="button" className={lang === 'hi' ? 'active' : ''} onClick={() => setLang('hi')}>हिन्दी</button>
+                  </div>
+                  <p className="psri-specialty-info-text">{String(lang === 'en' ? (g.summaryEn || '') : (g.summaryHi || '')) || 'No AI summary available yet.'}</p>
+                </>
+              )}
+              <div className="psri-side-results">
+                {(g.doctors || []).length === 0 && <p className="cp-hint">No doctors currently listed for this specialty.</p>}
+                {(g.doctors || []).map((r, i) => (
+                  <div key={i} className="psri-side-result-item" onClick={() => setActiveDoctor(r)}>
+                    <strong>{r.doctorName || '(unnamed)'}</strong>
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
-        </div>
+            </div>
+          ))}
+        </>
       )}
 
       {activeDoctor && (
