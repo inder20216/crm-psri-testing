@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import { psri } from '../api/psri';
 
 const SparkTGContext = createContext(null);
 
@@ -76,19 +77,31 @@ export function SparkTGProvider({ children, agentEmail = '' }) {
           // so we use our own pendingOutbound flag instead.
           const isOutbound = pendingOutbound.current;
           pendingOutbound.current = false;
+          const callId    = data?.callId || null;
+          const phone     = normalizePhone(data?.caller?.phone || '');
+          const calledTo  = normalizePhone(data?.calledTo || data?.did || '');
+          const direction = isOutbound ? 'outbound' : 'inbound';
           setCallState(prev => ({
-            phone:     normalizePhone(data?.caller?.phone || prev?.phone || ''),
+            phone:     phone || prev?.phone || '',
             name:      data?.caller?.name  || prev?.name  || '',
-            callId:    data?.callId        || prev?.callId || null,
-            calledTo:  normalizePhone(data?.calledTo || data?.did || prev?.calledTo || ''),
-            direction: isOutbound ? 'outbound' : 'inbound',
+            callId:    callId || prev?.callId || null,
+            calledTo:  calledTo || prev?.calledTo || '',
+            direction,
             ended:     false,
           }));
           setWidgetVisible(true);
+          if (callId) {
+            psri.logCall({ project: 'psri', callTxnId: callId, direction, phone, calledNumber: calledTo, status: 'started', agentEmail });
+          }
           break;
         }
         case 'hide_dialer':
-          setCallState(prev => (prev ? { ...prev, ended: true } : null));
+          setCallState(prev => {
+            if (prev?.callId) {
+              psri.logCall({ project: 'psri', callTxnId: prev.callId, status: 'ended', agentEmail });
+            }
+            return prev ? { ...prev, ended: true } : null;
+          });
           break;
         default:
           break;

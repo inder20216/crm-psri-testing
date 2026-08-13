@@ -1,0 +1,18 @@
+{
+  "name": "psri-telephony-service",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Always-on service that captures PSRI call data from SparkTG and writes it to MySQL (call_logs, agents) — no n8n involved.",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "dependencies": {
+    "axios": "^1.6.7",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "mysql2": "^3.9.7"
+  }
+}
