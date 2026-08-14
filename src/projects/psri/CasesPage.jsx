@@ -780,7 +780,11 @@ export default function CasesPage() {
             <div className="psri-subsection">
               <div className="psri-field">
                 <label>Transferred To</label>
-                <input type="text" value={form.transferredTo} onChange={e => setForm(f => ({ ...f, transferredTo: e.target.value }))} placeholder="Department / extension" />
+                <SearchableSelect
+                  value={form.transferredTo}
+                  onChange={v => setForm(f => ({ ...f, transferredTo: v }))}
+                  options={getList('Transferred To')}
+                />
               </div>
             </div>
           )}
@@ -801,7 +805,11 @@ export default function CasesPage() {
                 </div>
                 <div className="psri-field">
                   <label>Name of Procedure</label>
-                  <input type="text" value={form.nameOfProcedure} onChange={e => setForm(f => ({ ...f, nameOfProcedure: e.target.value }))} />
+                  <SearchableSelect
+                    value={form.nameOfProcedure}
+                    onChange={v => setForm(f => ({ ...f, nameOfProcedure: v }))}
+                    options={getList('Name of Procedure')}
+                  />
                 </div>
               </div>
               <div className="psri-form-row">
