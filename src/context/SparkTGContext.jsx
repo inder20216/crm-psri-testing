@@ -16,6 +16,33 @@ function normalizePhone(raw) {
   return s;
 }
 
+const POLL_ATTEMPTS = 6
+const POLL_DELAY_MS = 3000
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms))
+
+// n8n workflows are stateless request/response — unlike the old always-on
+// telephony service, nothing on the backend retries this on its own. The
+// browser drives it: wait a few seconds after a call ends for SparkTG to
+// finalize the record, poll, and retry a handful of times if it's not
+// ready yet. Fire-and-forget from the caller's point of view.
+async function pollAndEnrichCall(callId) {
+  for (let attempt = 1; attempt <= POLL_ATTEMPTS; attempt++) {
+    await sleep(POLL_DELAY_MS)
+    const res = await psri.pollSparkTG(callId)
+    if (res?.found && res.record) {
+      const r = res.record
+      await psri.enrichCallLog({
+        callTxnId: callId,
+        disposition: r.disposition || '',
+        duration: r.duration,
+        recording: r.recording || '',
+        ivrData: r.ivrData,
+      })
+      return
+    }
+  }
+}
+
 export function SparkTGProvider({ children, agentEmail = '' }) {
   const iframeRef       = useRef(null);
   const pendingOutbound = useRef(false);   // true when we sent click_to_call and await show_dialer back
@@ -99,6 +126,7 @@ export function SparkTGProvider({ children, agentEmail = '' }) {
           setCallState(prev => {
             if (prev?.callId) {
               psri.logCall({ project: 'psri', callTxnId: prev.callId, status: 'ended', agentEmail });
+              pollAndEnrichCall(prev.callId).catch(err => console.warn('[telephony] poll/enrich failed:', err.message));
             }
             return prev ? { ...prev, ended: true } : null;
           });
