@@ -15,6 +15,7 @@ import SparkTGWidget from './projects/psri/SparkTGWidget';
 import DialerPanel from './projects/psri/DialerPanel';
 import ChatWidget from './projects/psri/ChatWidget';
 import DoctorLookupWidget from './projects/psri/DoctorLookupWidget';
+import MissedCallsWidget from './projects/psri/MissedCallsWidget';
 import './App.css';
 
 function LoginScreen() {
@@ -135,6 +136,7 @@ function AppShell() {
                   <SparkTGWidget />
                   <DialerPanel />
                   <DoctorLookupWidget />
+                  <MissedCallsWidget />
                   <ChatWidget />
                 </div>
               </BrowserRouter>

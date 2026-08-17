@@ -2,7 +2,7 @@ import 'dotenv/config'
 import express from 'express'
 import cors from 'cors'
 import { pool } from './src/db.js'
-import { upsertCallLog, listCallLogs } from './src/callLog.js'
+import { upsertCallLog, listCallLogs, listMissedCalls } from './src/callLog.js'
 import { fetchAgents } from './src/sparktg.js'
 import { listProjects } from './src/config.js'
 
@@ -37,6 +37,19 @@ app.get('/call-logs', async (req, res) => {
     res.json({ success: true, callLogs: rows })
   } catch (err) {
     console.error('[GET /call-logs]', err.message)
+    res.status(400).json({ success: false, error: err.message })
+  }
+})
+
+// Unique latest missed inbound calls, bucketed by callback-attempt stage —
+// e.g. GET /call-logs/missed?project=psri
+app.get('/call-logs/missed', async (req, res) => {
+  try {
+    const { project, limit } = req.query
+    const rows = await listMissedCalls({ project, limit })
+    res.json({ success: true, missedCalls: rows })
+  } catch (err) {
+    console.error('[GET /call-logs/missed]', err.message)
     res.status(400).json({ success: false, error: err.message })
   }
 })

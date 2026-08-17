@@ -77,4 +77,15 @@ export const psri = {
       .then(d => (d && d.success ? d.callLogs : []))
       .catch(err => { console.warn('[telephony] getCallLogs failed:', err.message); return []; });
   },
+
+  // Unique latest missed inbound calls, bucketed by callback-attempt stage —
+  // see psri-telephony-service's GET /call-logs/missed.
+  getMissedCalls: () => {
+    const url = new URL(`${TELEPHONY_BASE}/call-logs/missed`, window.location.origin);
+    url.searchParams.set('project', 'psri');
+    return fetch(url.toString())
+      .then(r => r.json())
+      .then(d => (d && d.success ? d.missedCalls : []))
+      .catch(err => { console.warn('[telephony] getMissedCalls failed:', err.message); return []; });
+  },
 };
