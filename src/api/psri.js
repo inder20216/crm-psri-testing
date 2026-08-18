@@ -74,4 +74,10 @@ export const psri = {
   getMissedCalls: () => get('psri-missed-calls')
     .then(d => (d && d.success ? d.missedCalls : []))
     .catch(err => { console.warn('[telephony] getMissedCalls failed:', err.message); return []; }),
+
+  // Full call history (all calls, any outcome) — the general browsable log,
+  // as opposed to getMissedCalls()'s filtered callback-tracking view.
+  getCallLogs: (q) => get('psri-call-logs', { q })
+    .then(d => (d && d.success ? d.callLogs : []))
+    .catch(err => { console.warn('[telephony] getCallLogs failed:', err.message); return []; }),
 };
