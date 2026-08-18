@@ -70,14 +70,11 @@ export const psri = {
   pollSparkTG: (callId) => get('psri-sparktg-poll', { callId })
     .catch(err => { console.warn('[telephony] poll failed:', err.message); return { success: false, found: false }; }),
 
-  // Unique latest missed inbound calls, bucketed by callback-attempt stage.
-  getMissedCalls: () => get('psri-missed-calls')
-    .then(d => (d && d.success ? d.missedCalls : []))
-    .catch(err => { console.warn('[telephony] getMissedCalls failed:', err.message); return []; }),
-
-  // Full call history (all calls, any outcome) — the general browsable log,
-  // as opposed to getMissedCalls()'s filtered callback-tracking view.
-  getCallLogs: (q) => get('psri-call-logs', { q })
+  // Full call history (all calls, any outcome) — thin data API, no server-side
+  // computation. Accepts either a bare search string (Call Logs page) or an
+  // options object { q, days, limit } (Missed Calls widget pulls a wider
+  // window and computes its own state machine client-side).
+  getCallLogs: (opts) => get('psri-call-logs', typeof opts === 'string' ? { q: opts } : (opts || {}))
     .then(d => (d && d.success ? d.callLogs : []))
     .catch(err => { console.warn('[telephony] getCallLogs failed:', err.message); return []; }),
 };

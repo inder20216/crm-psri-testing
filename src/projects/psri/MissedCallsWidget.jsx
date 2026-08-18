@@ -5,6 +5,64 @@ import './Psri.css';
 
 const STAGE_LABEL = { 1: 'Missed', 2: '2nd Attempt', 3: '3rd Attempt' };
 const POLL_INTERVAL_MS = 60000;
+const LOOKBACK_DAYS = 30;
+const MAX_ATTEMPTS = 3;
+
+// Same callback-attempt state machine that used to run as an n8n Code node:
+// an unanswered inbound call starts (or continues) a missed streak; an
+// unanswered outbound call against an active streak is a failed callback
+// attempt; ANY answered call (either direction) clears the streak entirely;
+// 3 failed attempts and the number drops off the list. Runs client-side now
+// so n8n only ever serves raw rows, not a per-agent-per-minute computation.
+function computeMissedCalls(callLogs) {
+  const byPhone = new Map();
+  for (const c of callLogs) {
+    if (!c.phone) continue;
+    if (!byPhone.has(c.phone)) byPhone.set(c.phone, []);
+    byPhone.get(c.phone).push(c);
+  }
+
+  const results = [];
+  for (const [phone, calls] of byPhone) {
+    // callLogs arrives newest-first; walk chronologically oldest-first.
+    const chrono = [...calls].sort((a, b) => new Date(a.startedAt) - new Date(b.startedAt));
+
+    let streakStart = null;
+    let failedAttempts = 0;
+    let lastCall = null;
+
+    for (const c of chrono) {
+      const noDuration = !(Number(c.durationSeconds) > 0);
+      const isMissedDisposition = (c.disposition || '').trim().toUpperCase() === 'MISSED';
+      const answered = !noDuration && !isMissedDisposition;
+      lastCall = c;
+      if (answered) { streakStart = null; failedAttempts = 0; continue; }
+      if (c.direction === 'inbound') {
+        if (!streakStart) streakStart = c;
+      } else if (c.direction === 'outbound' && streakStart) {
+        failedAttempts++;
+      }
+    }
+
+    if (!streakStart) continue;
+    if (failedAttempts >= MAX_ATTEMPTS) continue;
+
+    results.push({
+      phone,
+      stage: failedAttempts + 1,
+      missedSince: streakStart.startedAt,
+      lastCallTxnId: lastCall.callTxnId,
+      lastDirection: lastCall.direction,
+      lastStartedAt: lastCall.startedAt,
+      lastAgentEmail: lastCall.agentEmail,
+      contactId: lastCall.contactId,
+      latestCase: null,
+    });
+  }
+
+  results.sort((a, b) => new Date(b.lastStartedAt) - new Date(a.lastStartedAt));
+  return results.slice(0, 100);
+}
 
 function timeAgo(iso) {
   if (!iso) return '';
@@ -27,7 +85,7 @@ function MissedCallCard({ call, onCallBack }) {
       </div>
       {c && (
         <div style={{ marginTop: 4 }}>
-          <span className="psri-badge">{c.callFor || c.call_for || '—'}</span>{' '}
+          <span className="psri-badge">{c.callFor || '—'}</span>{' '}
           <span className="stg-recent-summary">{String(c.summary || '')}</span>
         </div>
       )}
@@ -78,29 +136,46 @@ export default function MissedCallsWidget() {
   // Polls in the background regardless of whether the panel is open, so a
   // new missed call surfaces on its own instead of requiring the agent to
   // remember to click and check — same "no manual click needed" pattern
-  // the incoming-call DialerPanel already uses.
+  // the incoming-call DialerPanel already uses. n8n only ever returns raw
+  // call_logs rows here; the state machine and the case lookups both run
+  // in the browser, so the 60s poll never re-triggers a heavy backend job.
   const refresh = useCallback(() => {
     setLoading(true);
-    psri.getMissedCalls().then(rows => {
-      setCalls(rows);
+    psri.getCallLogs({ days: LOOKBACK_DAYS, limit: 5000 })
+      .then(async (rows) => {
+        const missed = computeMissedCalls(rows);
 
-      if (firstLoad.current) {
-        // Don't auto-pop on initial page load for calls that were already
-        // sitting there before this session started — only for ones that
-        // newly appear from here on.
-        firstLoad.current = false;
-        rows.forEach(r => seenPhones.current.add(r.phone));
-        return;
-      }
+        // Only look up a case for numbers that actually survived the state
+        // machine (usually a handful), not every call in the lookback window.
+        await Promise.all(missed.map(async (m) => {
+          try {
+            const res = await psri.getCases(m.phone);
+            m.latestCase = (res && res.cases && res.cases[0]) || null;
+          } catch {
+            m.latestCase = null;
+          }
+        }));
 
-      const freshlyMissed = rows.filter(r => r.stage === 1 && !seenPhones.current.has(r.phone));
-      rows.forEach(r => seenPhones.current.add(r.phone));
+        setCalls(missed);
 
-      if (freshlyMissed.length > 0) {
-        setStage(1);
-        setOpen(true);
-      }
-    }).finally(() => setLoading(false));
+        if (firstLoad.current) {
+          // Don't auto-pop on initial page load for calls that were already
+          // sitting there before this session started — only for ones that
+          // newly appear from here on.
+          firstLoad.current = false;
+          missed.forEach(r => seenPhones.current.add(r.phone));
+          return;
+        }
+
+        const freshlyMissed = missed.filter(r => r.stage === 1 && !seenPhones.current.has(r.phone));
+        missed.forEach(r => seenPhones.current.add(r.phone));
+
+        if (freshlyMissed.length > 0) {
+          setStage(1);
+          setOpen(true);
+        }
+      })
+      .finally(() => setLoading(false));
   }, []);
 
   useEffect(() => {
