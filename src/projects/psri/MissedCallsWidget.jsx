@@ -1,9 +1,10 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { psri } from '../../api/psri';
 import { useSparkTG } from '../../context/SparkTGContext';
 import './Psri.css';
 
 const STAGE_LABEL = { 1: 'Missed', 2: '2nd Attempt', 3: '3rd Attempt' };
+const POLL_INTERVAL_MS = 60000;
 
 function timeAgo(iso) {
   if (!iso) return '';
@@ -40,19 +41,8 @@ function MissedCallCard({ call, onCallBack }) {
   );
 }
 
-function MissedCallsPanel() {
-  const [stage, setStage] = useState(1);
-  const [calls, setCalls] = useState([]);
-  const [loading, setLoading] = useState(true);
+function MissedCallsPanel({ calls, loading, stage, setStage }) {
   const { dial } = useSparkTG();
-
-  const refresh = useCallback(() => {
-    setLoading(true);
-    psri.getMissedCalls().then(rows => setCalls(rows)).finally(() => setLoading(false));
-  }, []);
-
-  useEffect(() => { refresh(); }, [refresh]);
-
   const filtered = calls.filter(c => c.stage === stage);
 
   return (
@@ -79,6 +69,47 @@ function MissedCallsPanel() {
 
 export default function MissedCallsWidget() {
   const [open, setOpen] = useState(false);
+  const [calls, setCalls] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [stage, setStage] = useState(1);
+  const seenPhones = useRef(new Set());
+  const firstLoad = useRef(true);
+
+  // Polls in the background regardless of whether the panel is open, so a
+  // new missed call surfaces on its own instead of requiring the agent to
+  // remember to click and check — same "no manual click needed" pattern
+  // the incoming-call DialerPanel already uses.
+  const refresh = useCallback(() => {
+    setLoading(true);
+    psri.getMissedCalls().then(rows => {
+      setCalls(rows);
+
+      if (firstLoad.current) {
+        // Don't auto-pop on initial page load for calls that were already
+        // sitting there before this session started — only for ones that
+        // newly appear from here on.
+        firstLoad.current = false;
+        rows.forEach(r => seenPhones.current.add(r.phone));
+        return;
+      }
+
+      const freshlyMissed = rows.filter(r => r.stage === 1 && !seenPhones.current.has(r.phone));
+      rows.forEach(r => seenPhones.current.add(r.phone));
+
+      if (freshlyMissed.length > 0) {
+        setStage(1);
+        setOpen(true);
+      }
+    }).finally(() => setLoading(false));
+  }, []);
+
+  useEffect(() => {
+    refresh();
+    const interval = setInterval(refresh, POLL_INTERVAL_MS);
+    return () => clearInterval(interval);
+  }, [refresh]);
+
+  const totalCount = calls.length;
 
   return (
     <>
@@ -86,9 +117,19 @@ export default function MissedCallsWidget() {
         className={`dr-lookup-toggle-btn${open ? ' active' : ''}`}
         onClick={() => setOpen(o => !o)}
         title="Missed Calls"
-        style={{ right: 112 }}
+        style={{ right: 112, position: 'fixed' }}
       >
         ☎️
+        {totalCount > 0 && (
+          <span style={{
+            position: 'absolute', top: -4, right: -4,
+            background: '#ef4444', color: '#fff', fontSize: 10, fontWeight: 700,
+            borderRadius: 10, minWidth: 16, height: 16, lineHeight: '16px',
+            padding: '0 4px', textAlign: 'center',
+          }}>
+            {totalCount > 99 ? '99+' : totalCount}
+          </span>
+        )}
       </button>
 
       {open && (
@@ -98,7 +139,7 @@ export default function MissedCallsWidget() {
             <button className="dr-lookup-close-btn" onClick={() => setOpen(false)}>✕</button>
           </div>
           <div className="dr-lookup-body">
-            <MissedCallsPanel />
+            <MissedCallsPanel calls={calls} loading={loading} stage={stage} setStage={setStage} />
           </div>
         </div>
       )}
