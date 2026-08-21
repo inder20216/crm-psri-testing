@@ -366,8 +366,53 @@ export default function CasesPage() {
   const [aiCheckResult, setAiCheckResult] = useState(null);
   const [aiCheckErr, setAiCheckErr]       = useState('');
   const [saved, setSaved]                 = useState(false);
+  const [savingDraft, setSavingDraft]     = useState(false);
 
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(''), 2500); };
+
+  // Always holds the latest form, even inside effects that only re-run on
+  // other dependencies (e.g. the dialerPrefill interrupt handler below) —
+  // a plain closure over `form` there would see a stale snapshot.
+  const formRef = useRef(form);
+  useEffect(() => { formRef.current = form; }, [form]);
+
+  // Builds the same payload shape handleSave() sends, but tagged as an
+  // incomplete/draft record and without the full-case validation — used
+  // both by the explicit "Save as Incomplete" button and by the automatic
+  // save-before-overwrite when a new call interrupts an in-progress case.
+  const buildDraftPayload = (f) => ({
+    id: f.id,
+    contactId: f.contact.id, contactName: f.contact.name, contactMobile: f.contact.mobile,
+    channel: f.channel, calledNumber: f.calledNumber, callTxnId: f.callTxnId,
+    typeOfCall: f.typeOfCall, callFor: f.callFor, typeOfEnquiry: f.typeOfEnquiry,
+    priority: f.priority, status: 'Incomplete', summary: f.summary, assignedTo: f.assignedTo,
+    isAppointment: f.callFor === 'Appointment',
+    specialty: f.specialty, doctorName: f.doctorName,
+    specificDoctorRequested: f.specificDoctorRequested,
+    appointmentDate: f.appointmentDate, appointmentTime: f.appointmentTime, appointmentStatus: f.appointmentStatus,
+    typeOfComplaint: f.typeOfComplaint,
+    typeOfEmergency: f.typeOfEmergency,
+    isCallback: f.isCallback, callbackDatetime: f.callbackDatetime, callbackCompleted: f.callbackCompleted,
+    isTransfer: f.isTransfer, transferredTo: f.transferredTo,
+    isHighValue: f.isHighValue, typeOfProcedure: f.typeOfProcedure, nameOfProcedure: f.nameOfProcedure,
+    modeOfPayment: f.modeOfPayment, specialtyEnquiredFor: f.specialtyEnquiredFor,
+    isAppreciation: f.isAppreciation, appreciationDetails: f.appreciationDetails,
+  });
+
+  // Persists an in-progress form as an Incomplete case — never throws, since
+  // callers use this both as a background auto-save and as an explicit action
+  // that must not block the agent from moving on to the next call.
+  const saveAsIncomplete = async (f) => {
+    if (!f?.contact) return null;
+    try {
+      const payload = buildDraftPayload(f);
+      const res = payload.id ? await psri.updateCase(payload) : await psri.addCase(payload);
+      return res?.id || payload.id || null;
+    } catch (err) {
+      console.warn('[cases] save as incomplete failed:', err.message);
+      return null;
+    }
+  };
 
   const refresh = useCallback(() => {
     setLoading(true);
@@ -383,7 +428,28 @@ export default function CasesPage() {
   useEffect(() => {
     if (!dialerPrefill) return;
     setDialerPrefill(null);
-    if (dialerPrefill.repeatFrom) {
+
+    // A new call (or a Resume click) is about to replace whatever's on
+    // screen. If that's a brand-new, never-saved case the agent had started
+    // filling in, don't let it just vanish — stash it as Incomplete first.
+    // Skipped for cases opened via Edit (form.id set — never downgrade a
+    // real case's status) and right after a successful create (saved===true,
+    // form.id not yet populated locally — would otherwise duplicate it).
+    const prev = formRef.current;
+    if (showForm && prev?.contact && !prev.id && !saved && (prev.summary?.trim() || prev.callFor)) {
+      saveAsIncomplete(prev);
+      showToast('Previous case saved to Incomplete Cases');
+    }
+
+    setSaved(false);
+    setAiCheckResult(null);
+    setAiCheckErr('');
+
+    if (dialerPrefill.resumeCase) {
+      setForm(fromApiCase(dialerPrefill.resumeCase));
+      setDialerPrefillMobile('');
+      setAutoOpenQuickAdd(false);
+    } else if (dialerPrefill.repeatFrom) {
       const rep = fromApiCase(dialerPrefill.repeatFrom);
       setForm({
         ...rep,
@@ -395,6 +461,8 @@ export default function CasesPage() {
         callTxnId:  dialerPrefill.callTxnId  || '',
         contact:    dialerPrefill.contact    || rep.contact,
       });
+      setDialerPrefillMobile('');
+      setAutoOpenQuickAdd(false);
     } else {
       setForm({
         ...emptyForm,
@@ -502,7 +570,7 @@ export default function CasesPage() {
       contactId: form.contact.id, contactName: form.contact.name, contactMobile: form.contact.mobile,
       channel: form.channel, calledNumber: form.calledNumber, callTxnId: form.callTxnId,
       typeOfCall: form.typeOfCall, callFor: form.callFor, typeOfEnquiry: form.typeOfEnquiry,
-      priority: form.priority, status: form.status, summary: form.summary, assignedTo: form.assignedTo,
+      priority: form.priority, status: 'Resolved', summary: form.summary, assignedTo: form.assignedTo,
       isAppointment: form.callFor === 'Appointment',
       specialty: form.specialty, doctorName: form.doctorName,
       specificDoctorRequested: form.specificDoctorRequested,
@@ -531,6 +599,22 @@ export default function CasesPage() {
     } finally {
       setSaving(false);
     }
+  };
+
+  // Deliberate half-way save — lets the agent step away (e.g. to take a new
+  // call) without losing what's typed so far or forcing the required fields.
+  const handleSaveDraft = async () => {
+    if (!form.contact || savingDraft || saving) return;
+    setSavingDraft(true);
+    setSaveErr('');
+    const newId = await saveAsIncomplete(form);
+    setSavingDraft(false);
+    if (newId === null) {
+      setSaveErr('Could not save as Incomplete. Please try again.');
+      return;
+    }
+    showToast('Saved — resume anytime from Incomplete Cases');
+    setShowForm(false);
   };
 
   if (showForm) {
@@ -877,8 +961,13 @@ export default function CasesPage() {
               </>
             ) : (
               <>
-                <button type="button" className="psri-btn-ghost" onClick={() => { setShowForm(false); setSaved(false); }} disabled={saving}>Cancel</button>
-                <button type="submit" className="psri-btn-primary" disabled={saving}>{saving ? 'Saving…' : (form.id ? 'Save Changes' : 'Create Case')}</button>
+                <button type="button" className="psri-btn-ghost" onClick={() => { setShowForm(false); setSaved(false); }} disabled={saving || savingDraft}>Cancel</button>
+                {form.contact && (
+                  <button type="button" className="psri-btn-ghost" onClick={handleSaveDraft} disabled={saving || savingDraft} title="Save what's filled so far and come back to it later">
+                    {savingDraft ? 'Saving…' : '💾 Save as Incomplete'}
+                  </button>
+                )}
+                <button type="submit" className="psri-btn-primary" disabled={saving || savingDraft}>{saving ? 'Saving…' : (form.id ? 'Save Changes' : 'Create Case')}</button>
               </>
             )}
           </div>
