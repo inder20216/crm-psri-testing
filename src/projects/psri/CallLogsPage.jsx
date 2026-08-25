@@ -114,7 +114,7 @@ export default function CallLogsPage() {
                   <td>{c.calledNumber || '—'}</td>
                   <td><span className="psri-badge">{statusLabel(c)}</span></td>
                   <td>{fmtDuration(c.durationSeconds)}</td>
-                  <td>{c.agentEmail || '—'}</td>
+                  <td>{c.agentEmail || (c.agentNumber && `Ext. ${c.agentNumber}`) || '—'}</td>
                   <td>
                     {c.recordingUrl
                       ? <a href={c.recordingUrl} target="_blank" rel="noreferrer" className="psri-btn-ghost">▶ Play</a>
