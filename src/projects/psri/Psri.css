@@ -1304,3 +1304,42 @@
   overflow-y: auto;
   flex: 1;
 }
+
+/* ── CALL LOGS TABLE ── */
+.psri-table-wrap {
+  background: var(--psri-surface);
+  border: 1.5px solid var(--psri-border);
+  border-radius: var(--psri-radius);
+  overflow-x: auto;
+}
+.psri-table { width: 100%; border-collapse: collapse; font-size: 13px; white-space: nowrap; }
+.psri-table th {
+  text-align: left;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--psri-text-3);
+  padding: 12px 14px;
+  border-bottom: 1.5px solid var(--psri-border);
+  position: sticky;
+  top: 0;
+  background: var(--psri-surface);
+}
+.psri-table td {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--psri-border);
+  vertical-align: top;
+}
+.psri-table tr:last-child td { border-bottom: none; }
+.psri-table tr:hover td { background: var(--psri-bg); }
+.psri-table td.psri-td-wrap { white-space: normal; min-width: 220px; max-width: 320px; }
+.psri-table-case-summary {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--psri-text-2);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}

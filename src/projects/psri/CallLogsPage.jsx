@@ -90,37 +90,51 @@ export default function CallLogsPage() {
       )}
 
       {!loading && calls.length > 0 && (
-        <div className="psri-side-results" style={{ maxHeight: 'none' }}>
-          {calls.map(c => (
-            <div key={c.callTxnId} className="psri-side-result-item" style={{ cursor: 'default' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <strong>
-                  {c.direction === 'inbound' ? '↙' : '↗'} {c.phone || 'Unknown number'}
-                </strong>
-                <span className="cp-hint" style={{ margin: 0 }}>{fmtWhen(c.startedAt)}</span>
-              </div>
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 4, alignItems: 'center' }}>
-                <span className="psri-badge">{statusLabel(c)}</span>
-                <span className="cp-hint" style={{ margin: 0 }}>Duration: {fmtDuration(c.durationSeconds)}</span>
-                {c.agentEmail && <span className="cp-hint" style={{ margin: 0 }}>Agent: {c.agentEmail}</span>}
-                {c.calledNumber && <span className="cp-hint" style={{ margin: 0 }}>DID: {c.calledNumber}</span>}
-              </div>
-              {c.recordingUrl && (
-                <div style={{ marginTop: 6 }}>
-                  <a href={c.recordingUrl} target="_blank" rel="noreferrer" className="psri-btn-ghost">▶ Recording</a>
-                </div>
-              )}
-              {c.case && (
-                <div style={{ marginTop: 6 }}>
-                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-                    {c.case.callFor && <span className="psri-badge">{c.case.callFor}</span>}
-                    {c.case.status && <span className="psri-badge">{c.case.status}</span>}
-                  </div>
-                  {c.case.summary && <p className="stg-recent-summary" style={{ marginTop: 4 }}>{c.case.summary}</p>}
-                </div>
-              )}
-            </div>
-          ))}
+        <div className="psri-table-wrap">
+          <table className="psri-table">
+            <thead>
+              <tr>
+                <th>Timestamp</th>
+                <th>Contact</th>
+                <th>Phone</th>
+                <th>DID</th>
+                <th>Outcome</th>
+                <th>Duration</th>
+                <th>Agent</th>
+                <th>Recording</th>
+                <th>Case</th>
+              </tr>
+            </thead>
+            <tbody>
+              {calls.map(c => (
+                <tr key={c.callTxnId}>
+                  <td>{fmtWhen(c.startedAt)}</td>
+                  <td>{c.contactName || <span className="cp-hint">Unknown</span>}</td>
+                  <td>{c.direction === 'inbound' ? '↙' : '↗'} {c.phone || '—'}</td>
+                  <td>{c.calledNumber || '—'}</td>
+                  <td><span className="psri-badge">{statusLabel(c)}</span></td>
+                  <td>{fmtDuration(c.durationSeconds)}</td>
+                  <td>{c.agentEmail || '—'}</td>
+                  <td>
+                    {c.recordingUrl
+                      ? <a href={c.recordingUrl} target="_blank" rel="noreferrer" className="psri-btn-ghost">▶ Play</a>
+                      : <span className="cp-hint">—</span>}
+                  </td>
+                  <td className="psri-td-wrap">
+                    {c.case ? (
+                      <>
+                        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                          {c.case.callFor && <span className="psri-badge">{c.case.callFor}</span>}
+                          {c.case.status && <span className="psri-badge">{c.case.status}</span>}
+                        </div>
+                        {c.case.summary && <p className="psri-table-case-summary">{c.case.summary}</p>}
+                      </>
+                    ) : <span className="cp-hint">No case</span>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
     </div>
