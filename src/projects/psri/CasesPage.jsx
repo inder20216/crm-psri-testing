@@ -309,7 +309,7 @@ const emptyForm = {
   id: '', contact: null,
   channel: '', calledNumber: '', callTxnId: '',
   typeOfCall: '', callFor: '', typeOfEnquiry: '',
-  priority: '', status: 'Resolved', summary: '', assignedTo: '',
+  priority: '', queryType: '', status: 'Resolved', summary: '', assignedTo: '',
   specialty: '', doctorName: '', specificDoctorRequested: false,
   appointmentDate: '', appointmentTime: '', appointmentStatus: '',
   typeOfComplaint: '',
@@ -326,7 +326,7 @@ function fromApiCase(c) {
     contact: { id: c.contactId, name: c.contactName, mobile: c.contactMobile, mobileIsd: '+91' },
     channel: c.channel, calledNumber: c.calledNumber, callTxnId: c.callTxnId,
     typeOfCall: c.typeOfCall, callFor: c.callFor, typeOfEnquiry: c.typeOfEnquiry,
-    priority: c.priority, status: c.status, summary: c.summary, assignedTo: c.assignedTo,
+    priority: c.priority, queryType: c.queryType || '', status: c.status, summary: c.summary, assignedTo: c.assignedTo,
     specialty: c.specialty, doctorName: c.doctorName,
     specificDoctorRequested: c.specificDoctorRequested,
     appointmentDate: c.appointmentDate, appointmentTime: c.appointmentTime, appointmentStatus: c.appointmentStatus,
@@ -385,7 +385,7 @@ export default function CasesPage() {
     contactId: f.contact.id, contactName: f.contact.name, contactMobile: f.contact.mobile,
     channel: f.channel, calledNumber: f.calledNumber, callTxnId: f.callTxnId,
     typeOfCall: f.typeOfCall, callFor: f.callFor, typeOfEnquiry: f.typeOfEnquiry,
-    priority: f.priority, status: 'Incomplete', summary: f.summary, assignedTo: f.assignedTo,
+    priority: f.priority, queryType: f.queryType, status: 'Incomplete', summary: f.summary, assignedTo: f.assignedTo,
     isAppointment: f.callFor === 'Appointment',
     specialty: f.specialty, doctorName: f.doctorName,
     specificDoctorRequested: f.specificDoctorRequested,
@@ -570,7 +570,7 @@ export default function CasesPage() {
       contactId: form.contact.id, contactName: form.contact.name, contactMobile: form.contact.mobile,
       channel: form.channel, calledNumber: form.calledNumber, callTxnId: form.callTxnId,
       typeOfCall: form.typeOfCall, callFor: form.callFor, typeOfEnquiry: form.typeOfEnquiry,
-      priority: form.priority, status: 'Resolved', summary: form.summary, assignedTo: form.assignedTo,
+      priority: form.priority, queryType: form.queryType, status: 'Resolved', summary: form.summary, assignedTo: form.assignedTo,
       isAppointment: form.callFor === 'Appointment',
       specialty: form.specialty, doctorName: form.doctorName,
       specificDoctorRequested: form.specificDoctorRequested,
@@ -950,6 +950,14 @@ export default function CasesPage() {
                 {users.map(u => <option key={u.id} value={u.id}>{u.name} ({u.role})</option>)}
               </select>
             </div>
+            <div className="psri-field" style={{ maxWidth: 220 }}>
+              <label>Query Type</label>
+              <select value={form.queryType} onChange={e => setForm(f => ({ ...f, queryType: e.target.value }))}>
+                <option value="">— Select —</option>
+                <option value="Basic">Basic</option>
+                <option value="Detailed">Detailed</option>
+              </select>
+            </div>
           </div>
 
           <div className="psri-form-actions-sticky">
@@ -1052,6 +1060,7 @@ export default function CasesPage() {
                   </span>
                   {c.status && <span className="psri-badge">{c.status}</span>}
                   {c.priority && <span className="psri-badge">{c.priority}</span>}
+                  {c.queryType && <span className="psri-badge">{c.queryType}</span>}
                 </div>
               </div>
             </div>
@@ -1094,6 +1103,7 @@ export default function CasesPage() {
                 <div className="psri-detail-item"><span>Type of Enquiry</span><strong>{selected.typeOfEnquiry || '—'}</strong></div>
                 {selected.typeOfComplaint && <div className="psri-detail-item"><span>Type of Complaint</span><strong>{selected.typeOfComplaint}</strong></div>}
                 {selected.typeOfEmergency && <div className="psri-detail-item"><span>Type of Emergency</span><strong>{selected.typeOfEmergency}</strong></div>}
+                {selected.queryType && <div className="psri-detail-item"><span>Query Type</span><strong>{selected.queryType}</strong></div>}
                 <div className="psri-detail-item"><span>Assigned To</span><strong>{users.find(u => u.id === selected.assignedTo)?.name || '—'}</strong></div>
               </div>
               {selected.summary && (

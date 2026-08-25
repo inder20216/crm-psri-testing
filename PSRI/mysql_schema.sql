@@ -87,6 +87,7 @@ CREATE TABLE cases (
   call_for                   VARCHAR(100)  NOT NULL DEFAULT '',
   type_of_enquiry            VARCHAR(100)  NOT NULL DEFAULT '',
   priority                   VARCHAR(20)   NOT NULL DEFAULT '',
+  query_type                 VARCHAR(20)   NOT NULL DEFAULT '',   -- 'Basic' | 'Detailed'
   status                     VARCHAR(50)   NOT NULL DEFAULT '',
   summary                    TEXT          NULL,
   assigned_to                VARCHAR(100)  NOT NULL DEFAULT '',

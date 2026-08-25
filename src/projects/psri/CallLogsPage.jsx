@@ -32,7 +32,24 @@ export default function CallLogsPage() {
     setLoading(true);
     setLoadErr('');
     return psri.getCallLogs(q)
-      .then(rows => setCalls(rows))
+      .then(async (rows) => {
+        // Bulk-fetch the cases linked to these calls in one shot (not one
+        // lookup per row) and stitch them back on, so this page becomes the
+        // one place to see a call plus what it turned into — recording and
+        // case outcome together, whether the case is still Incomplete or
+        // already Resolved.
+        const txnIds = [...new Set(rows.filter(c => c.caseId).map(c => c.callTxnId).filter(Boolean))];
+        if (txnIds.length) {
+          try {
+            const res = await psri.getCases({ callTxnIds: txnIds.join(',') });
+            const byTxnId = new Map((res.cases || []).map(c => [c.callTxnId, c]));
+            rows.forEach(r => { r.case = byTxnId.get(r.callTxnId) || null; });
+          } catch {
+            rows.forEach(r => { r.case = null; });
+          }
+        }
+        setCalls(rows);
+      })
       .catch(() => setLoadErr('Could not load call logs. Please try again.'))
       .finally(() => setLoading(false));
   }, []);
@@ -91,6 +108,15 @@ export default function CallLogsPage() {
               {c.recordingUrl && (
                 <div style={{ marginTop: 6 }}>
                   <a href={c.recordingUrl} target="_blank" rel="noreferrer" className="psri-btn-ghost">▶ Recording</a>
+                </div>
+              )}
+              {c.case && (
+                <div style={{ marginTop: 6 }}>
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                    {c.case.callFor && <span className="psri-badge">{c.case.callFor}</span>}
+                    {c.case.status && <span className="psri-badge">{c.case.status}</span>}
+                  </div>
+                  {c.case.summary && <p className="stg-recent-summary" style={{ marginTop: 4 }}>{c.case.summary}</p>}
                 </div>
               )}
             </div>
