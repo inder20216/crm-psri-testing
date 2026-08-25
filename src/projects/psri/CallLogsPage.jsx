@@ -1,5 +1,6 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { psri } from '../../api/psri';
+import { useUsers } from '../../context/UsersContext';
 import './Psri.css';
 
 function fmtDuration(sec) {
@@ -22,11 +23,22 @@ function statusLabel(call) {
 }
 
 export default function CallLogsPage() {
+  const { users } = useUsers();
   const [query, setQuery] = useState('');
   const [calls, setCalls] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadErr, setLoadErr] = useState('');
   const debounceRef = useRef(null);
+
+  // SparkTG's webhook only gives us its own agent-number (the extension
+  // that placed/answered the call), not the CRM agent's identity — resolve
+  // it against the CRM Users list by matching on their contact number.
+  const nameByPhone = useMemo(() => new Map(users.filter(u => u.contact).map(u => [u.contact, u.name])), [users]);
+  const agentLabel = (c) => {
+    if (c.agentEmail) return c.agentEmail;
+    if (c.agentNumber) return nameByPhone.get(c.agentNumber) || `Ext. ${c.agentNumber}`;
+    return '—';
+  };
 
   const refresh = useCallback((q) => {
     setLoading(true);
@@ -114,7 +126,7 @@ export default function CallLogsPage() {
                   <td>{c.calledNumber || '—'}</td>
                   <td><span className="psri-badge">{statusLabel(c)}</span></td>
                   <td>{fmtDuration(c.durationSeconds)}</td>
-                  <td>{c.agentEmail || (c.agentNumber && `Ext. ${c.agentNumber}`) || '—'}</td>
+                  <td>{agentLabel(c)}</td>
                   <td>
                     {c.recordingUrl
                       ? <a href={c.recordingUrl} target="_blank" rel="noreferrer" className="psri-btn-ghost">▶ Play</a>
