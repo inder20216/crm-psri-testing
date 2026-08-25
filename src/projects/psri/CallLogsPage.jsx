@@ -22,6 +22,12 @@ function statusLabel(call) {
   return call.disposition || call.status || '—';
 }
 
+function typeLabel(direction) {
+  if (direction === 'inbound') return 'Incoming';
+  if (direction === 'outbound') return 'Outgoing';
+  return '—';
+}
+
 export default function CallLogsPage() {
   const { users } = useUsers();
   const [query, setQuery] = useState('');
@@ -106,23 +112,28 @@ export default function CallLogsPage() {
           <table className="psri-table">
             <thead>
               <tr>
-                <th>Timestamp</th>
-                <th>Contact</th>
-                <th>Phone</th>
-                <th>DID</th>
-                <th>Outcome</th>
+                <th>Call Txn ID</th>
+                <th>Start Time</th>
+                <th>End Time</th>
+                <th>Call Type</th>
+                <th>Customer Number</th>
+                <th>Virtual Number (DID)</th>
+                <th>Disposition</th>
                 <th>Duration</th>
                 <th>Agent</th>
                 <th>Recording</th>
+                <th>Contact</th>
                 <th>Case</th>
               </tr>
             </thead>
             <tbody>
               {calls.map(c => (
                 <tr key={c.callTxnId}>
-                  <td>{fmtWhen(c.startedAt)}</td>
-                  <td>{c.contactName || <span className="cp-hint">Unknown</span>}</td>
-                  <td>{c.direction === 'inbound' ? '↙' : '↗'} {c.phone || '—'}</td>
+                  <td className="cp-hint">{c.callTxnId || '—'}</td>
+                  <td>{fmtWhen(c.startedAt) || '—'}</td>
+                  <td>{fmtWhen(c.endedAt) || '—'}</td>
+                  <td>{c.direction === 'inbound' ? '↙ ' : '↗ '}{typeLabel(c.direction)}</td>
+                  <td>{c.phone || '—'}</td>
                   <td>{c.calledNumber || '—'}</td>
                   <td><span className="psri-badge">{statusLabel(c)}</span></td>
                   <td>{fmtDuration(c.durationSeconds)}</td>
@@ -132,6 +143,7 @@ export default function CallLogsPage() {
                       ? <a href={c.recordingUrl} target="_blank" rel="noreferrer" className="psri-btn-ghost">▶ Play</a>
                       : <span className="cp-hint">—</span>}
                   </td>
+                  <td>{c.contactName || <span className="cp-hint">Unknown</span>}</td>
                   <td className="psri-td-wrap">
                     {c.case ? (
                       <>
