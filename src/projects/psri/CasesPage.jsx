@@ -617,6 +617,30 @@ export default function CasesPage() {
     setShowForm(false);
   };
 
+  // One call can need several appointments (same contact/different doctors,
+  // one doctor/different family members, or fully mixed) — keep the call's
+  // own details attached without re-navigating or retyping the transaction id.
+  const addAnotherForSameCall = () => {
+    setForm({
+      ...emptyForm,
+      channel: form.channel,
+      typeOfCall: form.typeOfCall,
+      callTxnId: form.callTxnId,
+      calledNumber: form.calledNumber,
+      callFor: 'Appointment',
+      status: 'Resolved',
+      assignedTo: form.assignedTo,
+    });
+    setErrors({});
+    setSaveErr('');
+    setCalledSameAsContact(false);
+    setSaved(false);
+    setAiCheckResult(null);
+    setAiCheckErr('');
+    setDialerPrefillMobile('');
+    setAutoOpenQuickAdd(false);
+  };
+
   if (showForm) {
     return (
       <div className="psri-page">
@@ -965,6 +989,11 @@ export default function CasesPage() {
               <>
                 <span className="psri-saved-badge">✓ Saved — review AI suggestions on the right, then edit if needed</span>
                 <button type="submit" className="psri-btn-ghost" disabled={saving}>{saving ? 'Saving…' : 'Save Changes'}</button>
+                {form.callFor === 'Appointment' && (
+                  <button type="button" className="psri-btn-ghost" onClick={addAnotherForSameCall} title="Book another appointment from this same call — keeps the call details, lets you pick a new contact/doctor">
+                    + Add Another Appointment
+                  </button>
+                )}
                 <button type="button" className="psri-btn-primary" onClick={() => { setShowForm(false); setSelected(null); setSaved(false); setAiCheckResult(null); }}>Done</button>
               </>
             ) : (

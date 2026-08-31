@@ -63,16 +63,25 @@ export default function CallLogsPage() {
         // lookup per row) and stitch them back on, so this page becomes the
         // one place to see a call plus what it turned into — recording and
         // case outcome together, whether the case is still Incomplete or
-        // already Resolved.
+        // already Resolved. A single call can carry several cases (e.g.
+        // multiple appointments booked in one call), so group into arrays
+        // rather than keeping only the last one seen per call_txn_id.
         const txnIds = [...new Set(rows.filter(c => c.caseId).map(c => c.callTxnId).filter(Boolean))];
         if (txnIds.length) {
           try {
             const res = await psri.getCases({ callTxnIds: txnIds.join(',') });
-            const byTxnId = new Map((res.cases || []).map(c => [c.callTxnId, c]));
-            rows.forEach(r => { r.case = byTxnId.get(r.callTxnId) || null; });
+            const byTxnId = new Map();
+            (res.cases || []).forEach(c => {
+              const list = byTxnId.get(c.callTxnId) || [];
+              list.push(c);
+              byTxnId.set(c.callTxnId, list);
+            });
+            rows.forEach(r => { r.cases = byTxnId.get(r.callTxnId) || []; });
           } catch {
-            rows.forEach(r => { r.case = null; });
+            rows.forEach(r => { r.cases = []; });
           }
+        } else {
+          rows.forEach(r => { r.cases = []; });
         }
         setCalls(rows);
       })
@@ -153,14 +162,16 @@ export default function CallLogsPage() {
                   </td>
                   <td>{c.contactName || <span className="cp-hint">Unknown</span>}</td>
                   <td className="psri-td-wrap">
-                    {c.case ? (
-                      <>
-                        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                          {c.case.callFor && <span className="psri-badge">{c.case.callFor}</span>}
-                          {c.case.status && <span className="psri-badge">{c.case.status}</span>}
+                    {c.cases && c.cases.length > 0 ? (
+                      c.cases.map((cs, i) => (
+                        <div key={cs.id} style={i > 0 ? { marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--psri-border)' } : undefined}>
+                          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                            {cs.callFor && <span className="psri-badge">{cs.callFor}</span>}
+                            {cs.status && <span className="psri-badge">{cs.status}</span>}
+                          </div>
+                          {cs.summary && <p className="psri-table-case-summary">{cs.summary}</p>}
                         </div>
-                        {c.case.summary && <p className="psri-table-case-summary">{c.case.summary}</p>}
-                      </>
+                      ))
                     ) : <span className="cp-hint">No case</span>}
                   </td>
                 </tr>
