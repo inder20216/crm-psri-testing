@@ -184,7 +184,10 @@ export default function MissedCallsWidget() {
     return () => clearInterval(interval);
   }, [refresh]);
 
-  const totalCount = calls.length;
+  // Badge shows only fresh, not-yet-attempted misses — not the total across
+  // every stage, since 2nd/3rd-attempt calls have already been surfaced once
+  // and re-counting them here would overstate what's actually new.
+  const totalCount = calls.filter(c => c.stage === 1).length;
 
   return (
     <>
