@@ -38,13 +38,11 @@
 .chat-panel {
   position: fixed;
   top: 60px;
-  /* Bottom-anchored (not a fixed height) so the panel can never grow down
-     into the SparkTG dialer's floating buttons (bottom:24-120px, z-index
-     9000+) regardless of window height — it just gets shorter instead. */
-  bottom: 130px;
   right: 20px;
   width: 400px;
   max-width: calc(100vw - 40px);
+  height: 520px;
+  max-height: calc(100vh - 80px);
   background: #fff;
   border-radius: 14px;
   box-shadow: 0 12px 48px rgba(0,0,0,0.18);
