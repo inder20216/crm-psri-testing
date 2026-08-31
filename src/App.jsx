@@ -11,6 +11,7 @@ import { GuidanceProvider } from './context/GuidanceContext';
 import UsersPage from './admin/UsersPage';
 import PicklistsPage from './admin/PicklistsPage';
 import DependenciesPage from './admin/DependenciesPage';
+import ProductivityPage from './admin/ProductivityPage';
 import SparkTGWidget from './projects/psri/SparkTGWidget';
 import DialerPanel from './projects/psri/DialerPanel';
 import ChatWidget from './projects/psri/ChatWidget';
@@ -94,7 +95,7 @@ function AccessDenied() {
 }
 
 function AppShell() {
-  const { isAuthenticated, currentUser, authLoading, accessDenied, isSuperAdmin } = useAuth();
+  const { isAuthenticated, currentUser, authLoading, accessDenied, isSuperAdmin, isAdmin } = useAuth();
 
   if (!isAuthenticated) return <LoginScreen />;
   if (authLoading) return (
@@ -129,6 +130,9 @@ function AppShell() {
                         <Route path="/admin/picklists"    element={<main className="ucrm-main"><PicklistsPage /></main>} />
                         <Route path="/admin/dependencies" element={<main className="ucrm-main"><DependenciesPage /></main>} />
                       </>
+                    )}
+                    {isAdmin && (
+                      <Route path="/admin/productivity" element={<main className="ucrm-main"><ProductivityPage /></main>} />
                     )}
                     <Route path="/admin/*" element={<Navigate to="/psri/contacts" replace />} />
                     <Route path="/" element={<Navigate to="/psri/contacts" replace />} />

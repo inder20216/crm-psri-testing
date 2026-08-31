@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { psri } from '../../api/psri';
 import { useUsers } from '../../context/UsersContext';
+import { buildAgentNumberMap, resolveAgentLabel } from './agentResolve';
 import './Psri.css';
 
 function fmtDuration(sec) {
@@ -36,23 +37,8 @@ export default function CallLogsPage() {
   const [loadErr, setLoadErr] = useState('');
   const debounceRef = useRef(null);
 
-  // SparkTG's webhook only gives us its own agent-number — sometimes the
-  // agent's personal mobile (matches Users.contact), sometimes SparkTG's own
-  // internal extension id (matches the separately-maintained Users.sparktgExtension).
-  // Check both before falling back to showing the raw number.
-  const nameByNumber = useMemo(() => {
-    const map = new Map();
-    users.forEach(u => {
-      if (u.contact) map.set(u.contact, u.name);
-      if (u.sparktgExtension) map.set(u.sparktgExtension, u.name);
-    });
-    return map;
-  }, [users]);
-  const agentLabel = (c) => {
-    if (c.agentEmail) return c.agentEmail;
-    if (c.agentNumber) return nameByNumber.get(c.agentNumber) || `Ext. ${c.agentNumber}`;
-    return '—';
-  };
+  const nameByNumber = useMemo(() => buildAgentNumberMap(users), [users]);
+  const agentLabel = (c) => resolveAgentLabel(c, nameByNumber);
 
   const refresh = useCallback((q) => {
     setLoading(true);

@@ -10,7 +10,7 @@ function initials(name) {
 
 export default function ProjectRail() {
   const { pathname } = useLocation();
-  const { currentUser, isSuperAdmin, logout } = useAuth();
+  const { currentUser, isSuperAdmin, isAdmin, logout } = useAuth();
   const [expanded, setExpanded] = useState(false);
 
   // Users only see PSRI; Super Admins see all projects
@@ -93,6 +93,19 @@ export default function ProjectRail() {
               </div>
             )}
           </div>
+        )}
+
+        {/* Productivity dashboard — Admin and Super Admin (TL/Manager) */}
+        {isAdmin && (
+          <Link
+            to="/admin/productivity"
+            className={`rail-item ${pathname === '/admin/productivity' ? 'active' : ''}`}
+            style={{ '--rail-color': '#4338ca' }}
+            title="Agent Productivity"
+          >
+            <span className="rail-icon">📊</span>
+            {expanded && <span className="rail-label">Productivity</span>}
+          </Link>
         )}
 
         {/* Logged-in user avatar + logout */}
