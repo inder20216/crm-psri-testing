@@ -36,13 +36,21 @@ export default function CallLogsPage() {
   const [loadErr, setLoadErr] = useState('');
   const debounceRef = useRef(null);
 
-  // SparkTG's webhook only gives us its own agent-number (the extension
-  // that placed/answered the call), not the CRM agent's identity — resolve
-  // it against the CRM Users list by matching on their contact number.
-  const nameByPhone = useMemo(() => new Map(users.filter(u => u.contact).map(u => [u.contact, u.name])), [users]);
+  // SparkTG's webhook only gives us its own agent-number — sometimes the
+  // agent's personal mobile (matches Users.contact), sometimes SparkTG's own
+  // internal extension id (matches the separately-maintained Users.sparktgExtension).
+  // Check both before falling back to showing the raw number.
+  const nameByNumber = useMemo(() => {
+    const map = new Map();
+    users.forEach(u => {
+      if (u.contact) map.set(u.contact, u.name);
+      if (u.sparktgExtension) map.set(u.sparktgExtension, u.name);
+    });
+    return map;
+  }, [users]);
   const agentLabel = (c) => {
     if (c.agentEmail) return c.agentEmail;
-    if (c.agentNumber) return nameByPhone.get(c.agentNumber) || `Ext. ${c.agentNumber}`;
+    if (c.agentNumber) return nameByNumber.get(c.agentNumber) || `Ext. ${c.agentNumber}`;
     return '—';
   };
 

@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useUsers, ROLES } from '../context/UsersContext';
 import './Admin.css';
 
-const emptyForm = { id: '', name: '', contact: '', email: '', password: '', role: 'User' };
+const emptyForm = { id: '', name: '', contact: '', email: '', password: '', role: 'User', sparktgExtension: '' };
 
 export default function UsersPage() {
   const { users, loading, error, addUser, updateUser } = useUsers();
@@ -107,6 +107,16 @@ export default function UsersPage() {
           </div>
 
           <div className="admin-field">
+            <label>SparkTG Extension <span style={{ color: '#94a3b8', fontWeight: 400 }}>(optional — used to match this agent's calls on Call Logs)</span></label>
+            <input
+              type="text"
+              value={form.sparktgExtension}
+              onChange={e => setForm(f => ({ ...f, sparktgExtension: e.target.value.trim() }))}
+              placeholder="e.g. 11128705"
+            />
+          </div>
+
+          <div className="admin-field">
             <label>User Password {form.id && <span style={{ color: '#94a3b8', fontWeight: 400 }}>(leave blank to keep unchanged)</span>} {!form.id && <span className="req">*</span>}</label>
             <input
               type="password"
@@ -154,6 +164,7 @@ export default function UsersPage() {
                 <th>Contact Number</th>
                 <th>Official Email</th>
                 <th>Role</th>
+                <th>SparkTG Extension</th>
                 <th></th>
               </tr>
             </thead>
@@ -164,13 +175,14 @@ export default function UsersPage() {
                   <td>{u.contact}</td>
                   <td>{u.email}</td>
                   <td><span className={`admin-role-badge role-${u.role.replace(/\s+/g, '-').toLowerCase()}`}>{u.role}</span></td>
+                  <td>{u.sparktgExtension || '—'}</td>
                   <td className="admin-row-actions">
                     <button className="admin-btn-ghost" onClick={() => openEdit(u)}>Edit</button>
                   </td>
                 </tr>
               ))}
               {users.length === 0 && (
-                <tr><td colSpan={5} style={{ textAlign: 'center', color: '#94a3b8', padding: 24 }}>No users yet</td></tr>
+                <tr><td colSpan={6} style={{ textAlign: 'center', color: '#94a3b8', padding: 24 }}>No users yet</td></tr>
               )}
             </tbody>
           </table>
