@@ -1,17 +1,18 @@
 # PSRI Hospital CRM — Process Documentation
 
 ## Overview
-A call center CRM for PSRI Hospital (Pushpawati Singhania Hospital & Research Institute), built as the first project inside a new **Universal CRM** platform — a Vtiger-style shell designed to host multiple unrelated business lines (PSRI, VMM, future "Lots"), each as an independent project with its own modules, sharing one User Management / Picklist / Dependency layer.
+A call center CRM for PSRI Hospital (Pushpawati Singhania Research Institute), built as the first project inside a new **Universal CRM** platform — a Vtiger-style shell designed to host multiple unrelated business lines (PSRI, VMM, future "Lots"), each as an independent project with its own modules, sharing one User Management / Picklist / Dependency layer.
 
-PSRI currently uses Vtiger with no automation; this replaces it with a custom-built system, migrating ~147,000 historical contact records from Vtiger exports.
+PSRI is transitioning off Vtiger onto this system in a single full cutover (not a phased dual-system rollout), with live call telephony (SparkTG) capture built in from day one.
 
 ## Architecture
-- **Frontend**: React + Vite app at `universal-crm/` (separate from `vmm-crm/` — VMM stays a standalone deployed app for now, linked from a placeholder page inside the universal shell)
-- **Shell design**: a single expandable left rail (icon-only by default, expands to show project names + module sub-links) replaces a separate per-project sidebar. Projects are registered in `src/projects/registry.jsx` — adding a new project later is just one entry, no shell rewiring.
-- **Backend split by data volume**:
-  - **Supabase (Postgres)** — `contacts` and `cases` tables. Originally built on Google Sheets, but n8n's Google Sheets node **crashed** (`RangeError: Maximum call stack size exceeded`) trying to load the full 147k-row Contacts sheet in one execution — Google Sheets cannot serve large-table reads reliably. Migrated to Supabase (free tier, hosted Postgres + REST API), using n8n's native **Supabase node** (not raw HTTP requests — cleaner auth, no header-mismatch risk).
-  - **Google Sheets** — Users, Picklists, Dependencies. These stay small (dozens to low hundreds of rows), so Sheets remains fine here; matches the original "stay on Sheets" preference where the data volume allows it.
-- **n8n**: same self-hosted instance as VMM (`automation.openmindhelpline.com`), workflows kept in `PSRI/Workflows/` (local only, not in git, since they contain credential references)
+- **Frontend**: React + Vite app at `universal-crm/` (separate from `vmm-crm/` — VMM stays a standalone deployed app for now, linked from a placeholder page inside the universal shell). Deployed to GitHub Pages at `https://inder20216.github.io/crm-psri-testing/` via `npm run deploy`.
+- **Shell design**: a single expandable left rail (icon-only by default, expands to show project names + module sub-links) replaces a separate per-project sidebar. Projects are registered in `src/projects/registry.jsx`.
+- **Backend split by data volume and ownership**:
+  - **MySQL** (`psri` database, phpMyAdmin-managed) — `contacts`, `cases`, and `call_logs` tables. Originally built on Google Sheets, then Supabase; migrated to MySQL for the 147k-row contact volume and to support the telephony (`call_logs`) integration on the same database. All access goes through n8n's "MySQL PSRI" credential — no direct app-to-DB connection.
+  - **Google Sheets** ("OM CRM - PSRI") — Users, Picklists, Dependencies, SpecialtySummaries, Guidance, Doctors tabs. These stay small (dozens to low hundreds of rows), so Sheets remains fine here.
+- **n8n**: self-hosted instance at `automation.openmindhelpline.com`, workflows kept in `PSRI/Workflows/` (local only, gitignored, since they contain credential references). Production webhooks resolve at `https://automation.openmindhelpline.com/webhook/<path>`; the frontend proxies through `/psri-webhook/<path>` (see `vite.config.js` / `.env.production`).
+- **Auth**: MSAL (Microsoft/Azure AD) — a logged-in account's email is matched case-insensitively against the Users sheet's `User Official Email` column; no match means Access Denied.
 
 ## Modules (in the React app, under the PSRI project)
 
@@ -19,131 +20,100 @@ PSRI currently uses Vtiger with no automation; this replaces it with a custom-bu
 |---|---|---|
 | Contacts | `/psri/contacts` | Patient/caller directory |
 | Cases | `/psri/cases` | Call center case logging |
+| Incomplete Cases | `/psri/incomplete-cases` | Drafts saved mid-call (see below) |
+| Call Logs | `/psri/call-logs` | Full call history table, live from SparkTG |
 | (Leads) | — | Not yet built — pending after Cases is solid |
 
-Plus platform-level admin (under the ⚙ Settings rail icon, shared across all projects):
-| Page | Route | Purpose |
-|---|---|---|
-| Users | `/admin/users` | User Management — roles: Super Admin, Admin, User |
-| Picklists | `/admin/picklists` | Flat admin-managed dropdown values (Contact Type, Source of Information, Language, City, Channel, Type of Call, Call For, Type of Enquiry, Priority, Case Status, Appointment Status, Specialty, Type of Procedure, Mode of Payment, Doctor) |
-| Dependencies | `/admin/dependencies` | Value-to-value relationships between picklists (e.g. Specialty=Cardiology → Doctor=Dr. X) |
+Plus platform-level admin:
+| Page | Route | Access | Purpose |
+|---|---|---|---|
+| Users | `/admin/users` | Super Admin only | User Management — roles: Super Admin, Admin, User |
+| Picklists | `/admin/picklists` | Super Admin only | Flat admin-managed dropdown values |
+| Dependencies | `/admin/dependencies` | Super Admin only | Value-to-value relationships between picklists |
+| Productivity | `/admin/productivity` | Admin **or** Super Admin (TL/Manager) | Per-agent call volume, AHT, missed-call callback TAT — see Telephony section |
 
 ## Data Model
 
-### Contacts (Supabase `contacts` table)
-Salutation, Full Name (auto-corrected to Title Case on blur), Age, Mobile + Alt Mobile + Landline (each with its own ISD code dropdown showing "+91 India" style labels), Email, Country → State → City (cascading for India via a static dataset; free text for other countries), Contact Type, Source of Information, Language, Assigned To (references Users), Notes.
+### Contacts (MySQL `contacts` table)
+Salutation, Full Name (auto-corrected to Title Case on blur), Age, Mobile + Alt Mobile + Landline (each with its own ISD code dropdown), Email, Country → State → City (cascading for India via a static dataset), Contact Type, Source of Information, Language, Assigned To, Notes.
 
-Duplicate rule: a new contact is blocked only if **both name AND mobile** match an existing contact exactly (same mobile with a different name is allowed — e.g. family members sharing one number).
+Duplicate rule: a new contact is blocked only if **both name AND mobile** match an existing contact exactly.
 
-### Cases (Supabase `cases` table)
-Linked to a Contact via `contact_id` (denormalized `contact_name`/`contact_mobile` copied in for fast list display). Core fields: Channel, Called Number, **Call Transaction ID** (SparkTG UUID format), Type of Call, Call For, Type of Enquiry, Priority, Status, Summary, Assigned To. Four optional toggle sections, each revealing more fields only when checked:
-- **Appointment**: Specialty, Doctor Name (dependent on Specialty), Specific Doctor Requested, Appointment Date/Time, Appointment Status (dependent on Call For)
+### Cases (MySQL `cases` table)
+Linked to a Contact via `contact_id` (`NOT NULL` FK — a case cannot exist without a contact; denormalized `contact_name`/`contact_mobile` copied in for fast list display). Core fields: Channel, Called Number, **Call Transaction ID** (`call_txn_id`, links to `call_logs.call_txn_id` by value — no FK, since `call_logs` is shared across projects), Type of Call, Call For, Type of Enquiry, Priority, **Query Type** (Basic / Detailed — a global classification tag, no extra fields unlocked), Status, Summary. Four optional toggle sections:
+- **Appointment**: Specialty, Doctor Name (dependent on Specialty), Specific Doctor Requested, Appointment Date/Time, Appointment Status
 - **Callback**: Call Back Date & Time, Was Call Back Completed
 - **Transfer**: Transferred To
 - **High Value**: Type of Procedure, Name of Procedure, Mode of Payment, Specialty Enquired For
 
-Contact resolution flow for new Cases: search existing contacts first (debounced, server-side search by name/mobile/email); if no match, a **Quick Add Contact** inline modal opens. This modal captures the **full Contact field set** (Salutation, Name, Age, Mobile/Alt Mobile/Landline with ISD, Email, Country/State/City, Contact Type, Source, Language, Assigned To, Notes) — same fields as the standalone Contacts form — so nothing has to be filled in later. (Originally scoped as a minimal 4-field quick-add; expanded after the user asked for full capture at Quick Add time, not deferred to the Contacts page.)
+**Assigned To**: visible and editable only for Admin/Super Admin roles (TLs/Managers). Regular agents never see this field — every case they create is silently assigned to themselves, with no way to change it, including via "Repeat with New Enquiry" (which used to inherit the original historical case's assignee; now always defaults to the current agent).
 
-The Case form is laid out as **two columns**: the form itself (left, capped at 920px) plus a **sticky right sidebar** (`.psri-case-sidebar`) containing:
-- **Doctor &amp; Specialty Lookup** — two fully independent search tabs, see dedicated section below.
-- **Contact History** — once a Contact is selected/created, shows their past Cases (reuses the existing Cases search by mobile number — no new backend needed) so the agent can see what the caller previously enquired about and whether they'd already booked an appointment.
+**Multiple appointments per call**: one call can require several appointments (same contact/different doctors, one doctor/different family members, or a fully mixed combination). After saving an Appointment case, a **"+ Add Another Appointment"** button keeps the call's Channel/Type of Call/Call Transaction ID attached but resets contact and doctor, so the agent can pick a new contact (search or Quick Add) and doctor without re-navigating. Several `cases` rows can legitimately share one `call_txn_id` — this is intentional, not a bug, and both the Call Logs page and the bulk case-lookup-by-`call_txn_id` endpoint (`n8n_psri_cases_list_mysql.json`'s `callTxnIds` param) handle it as an array, not a single value.
+
+Contact resolution flow: search existing contacts first (debounced, server-side, by name/mobile/email); if no match, a **Quick Add Contact** inline modal opens, capturing the full Contact field set.
+
+The Case form is two columns: the form itself (left) plus a sticky right sidebar containing Live Agent Guidance, the AI Advisor (post-save), Doctor & Specialty Lookup, and Contact History.
+
+### Incomplete Cases (same `cases` table, `status = 'Incomplete'`)
+A new call interrupting an in-progress, never-yet-saved case would previously overwrite the form with zero warning. Now:
+- **Automatic**: if the agent has an unsaved new case open (contact picked, some real content entered) and a new call/Resume interrupts it, it's silently saved as `status = 'Incomplete'` before the form resets — skipped for cases opened via Edit (never downgrades a real case) and right after a successful create (avoids a duplicate).
+- **Manual**: a **"💾 Save as Incomplete"** button lets an agent deliberately save half-finished work and step away, without needing to fill the normally-required fields (Type of Call/Call For/Summary skip validation server-side when `status === 'Incomplete'`).
+- Drafts show up on the dedicated **Incomplete Cases** page with their Call Transaction ID and a recording link (looked up from `call_logs` by transaction id), plus a **Resume** button that reloads the draft back into the Cases form. Completing it normally flips `status` back to `Resolved`.
 
 ### Users (Google Sheets `Users` tab)
-User ID, User Name, User Contact Number, User Official Email, User Password, Role, Created. **No delete endpoint exists at all** — removal is structurally impossible, not just hidden in the UI. Role changes are blocked if they would leave zero Super Admins.
+Columns: `User ID`, `User Name`, `User Contact Number`, `User Official Email`, `User Password`, `Role`, `SparkTG Extension`, `Created`. No delete endpoint exists at all. Role changes are blocked if they would leave zero Super Admins.
 
-### Picklists (Google Sheets `Picklists` tab)
-Columns: `List Name`, `Value`. Flat key-value store — any list name works, admin can create brand-new lists from the Picklists page itself, not just add values to pre-known ones.
+`SparkTG Extension` is a newer column: SparkTG's call webhook sends an `agent-number` field that's inconsistently either the agent's personal mobile (matches `User Contact Number`) or SparkTG's own internal extension id — this column lets an admin record the extension separately so Call Logs/Productivity can resolve either format to the real agent name (`src/projects/psri/agentResolve.js`).
 
-### Dependencies (Google Sheets `Dependencies` tab)
-Columns: `Main Field`, `Main Value`, `Sub Field`, `Sub Value`. Every row is an explicit value-to-value pair (not a generic "list A depends on list B" declaration) — e.g. `Specialty | Cardiology | Doctor | Dr. Rahul Manchanda`. Three relationships currently wired into the Cases form:
-- Specialty → Doctor
-- Call For → Type of Enquiry
-- Call For → Appointment Status
+### Picklists / Dependencies (Google Sheets)
+Unchanged from original design — flat `List Name`/`Value` pairs for Picklists; explicit value-to-value pairs for Dependencies. Wired relationships: Specialty→Doctor, Call For→Type of Enquiry, Call For→Appointment Status, Type of Call→Call For.
 
-Dependent dropdowns fall back to the flat Picklist (ungated) list if no dependency pairs exist yet for the selected parent value, so the form never shows an empty dropdown while data is still being populated.
+## Telephony (SparkTG) Integration
 
-**Type of Call → Call For** is now a 4th wired dependency — `CasesPage.jsx`'s Call For dropdown narrows by the selected Type of Call via the same `getDependentOptions()` helper used for Specialty→Doctor (added to `DependenciesContext.jsx`'s `KNOWN_RELATIONSHIPS`). Selecting a new Type of Call resets Call For/Type of Enquiry/Appointment Status downstream.
+### `call_logs` table (MySQL, shared schema across projects via a `project` column)
+`call_txn_id` (unique), `direction`, `phone`, `called_number`, `agent_email`, `agent_number`, `contact_id`, `case_id`, `status`, `disposition`, `duration_seconds`, `recording_url`, `started_at`, `ended_at`.
 
-### Dependency data status (as of latest update)
-- **Type of Call → Call For** — confirmed, wired into the Cases form, and the 28-row table (Inbound: 6 values — Appointment, Enquiry or Transfer, Complaint/Feedback, Emergency, Inaudible or Call Disconnected, Language Barrier; Abandoned Call and Outbound: 11 values each — same 6 plus Unable to Connect, Concern Resolved, Already taken appointment, Consulted in Other Hospital, Called By Mistake) was handed to the user as a paste-ready block for the `Dependencies` sheet
-- **Specialty base list** — 40 PSRI specialties added to the `Picklists` sheet (Anesthesiology through Wellness)
-- **Specialty → Doctor pairing** — **architecture changed**: PSRI's doctor roster is being connected as its own **live Google Sheet** (Doctor Master), not just typed into the Dependencies table, because it carries far more than a name (Consultation Charges, Availability, Specific Protocols, Appointment Details, Experience, etc.). Plan: (1) Dependencies sheet keeps a lightweight Specialty→Doctor Name pair (just for the Cases form's Doctor Name dropdown), sourced as a two-column extract from the live sheet; (2) a separate **Doctor Master lookup** (new n8n workflow, not yet built) reads the full live sheet for a future "Doctor Details" panel. Waiting on the live sheet's ID/share access + tab/column names from PSRI.
+### Two independent capture paths, both writing to the same table
+1. **Browser capture** (`SparkTGContext.jsx`) — the embedded SparkTG dialer widget's `show_dialer`/`hide_dialer` postMessage events fire `psri.logCall(...)` the instant a call starts/ends, populating `agent_email` from the logged-in CRM session. Blind spot: only fires if an agent's browser widget is open — a call that rings with nobody logged in is never captured this way.
+2. **SparkTG webhook** (`n8n_psri_sparktg_webhook.json`, `POST/GET /psri-sparktg-webhook`) — configured directly in SparkTG's system (requires their support team to set the callback URL per service ID; self-service wasn't available in the admin panel). Sends `callid`, `call-type`, `customer-number`, `virtual-number`, `agent-number`, `disposition` (`answered`/`missed`), `call-duration`, `recording-url`, `start-time`, `end-time` — a complete call summary including the answer/missed outcome directly, no reconstruction needed. This path has **no blind spot** — it fires regardless of whether any agent's browser is open. Both paths upsert the same `call_logs` row (keyed by `call_txn_id`), only overwriting a field when the new data actually has a value for it.
+   - Note: SparkTG sends the literal string `"-"` (not blank) when it has no `agent-number` for a call — normalized to empty, same as everywhere else.
 
-## Known Lessons / Gotchas
-- **n8n field-mapping doesn't always survive JSON import** — both Google Sheets and Supabase nodes have shown blank "Fields to Send" after importing a workflow JSON, even though the export looked correct. Always manually verify field mappings on Insert/Update/Append nodes after import, same as verifying credentials.
-- **Supabase node has no native OR-across-fields filter** — multi-field search (e.g. matching name OR mobile OR email) is done via several parallel `getAll` calls (one per field) feeding into a dedupe-by-id Code node, rather than one query.
-- **ISD codes from bulk-imported data need normalizing** — the original Vtiger export stored `"91"` instead of `"+91"`; the List workflow normalizes this on read (prepends `+` if missing) so the frontend's ISD dropdown always matches.
+### Call Logs page (`/psri/call-logs`)
+Full-detail table: Call Txn ID, Start/End Time, Call Type, Customer/Virtual Number, Disposition, Duration, **Agent** (resolved to a CRM name via `agentResolve.js`, falling back to `Ext. <number>` if unmapped), Recording, **Contact** (server-side `LEFT JOIN` against `contacts`), and every linked **Case** (array, not a single value — see Multiple Appointments above).
 
-## AI / Guidance Features (Cases form)
+### Missed Calls widget (floating panel, `MissedCallsWidget.jsx`)
+Client-side state machine (not a server-side computation, to avoid re-running heavy logic in n8n every 60s per agent) reading raw `call_logs` rows: an unanswered inbound call opens a "missed" streak for that phone number; an unanswered outbound callback increments the attempt count (1st/2nd/3rd); any answered call (in either direction) clears the streak; 3 failed attempts drops the number off the list entirely. The toggle badge shows only stage-1 (fresh) misses, not the sum across all three attempt tabs.
 
-### Specialty AI Summary (built)
-Cached, not live — specialties are a fixed ~40-value list, so summaries are generated **once** per specialty (English + Hindi) and stored, rather than calling OpenAI on every Case. Pieces:
-- **`SpecialtySummaries` Google Sheet tab** (new, same "OM CRM - PSRI" sheet) — columns `Specialty`, `Summary EN`, `Summary HI`.
-- **`n8n_psri_specialty_summary_generate.json`** (self-hosted instance) — `POST /psri-specialty-summary-generate`, run manually/occasionally: reads the `Specialty` Picklist, diffs against what's already cached, calls OpenAI (`gpt-4o-mini`) once per missing specialty for a 2-3 sentence EN+HI explanation aimed at a call-center agent reading aloud to a patient, appends each result. Re-running it is safe — already-cached specialties are skipped.
-- **`n8n_psri_specialty_summaries_list.json`** (self-hosted) — `GET /psri-specialty-summaries`, simple cached read, same pattern as Picklists/Dependencies list workflows.
-- **Frontend**: `SpecialtySummariesContext.jsx` (fetch-once-on-load, like `PicklistsContext`) + a `SpecialtyInfo` component in `CasesPage.jsx` — an "About {Specialty}" toggle next to the Specialty dropdown in the Appointment section, with an English/Hindi button toggle.
-- Still needed: import + activate the 3 workflows, set the real `SpecialtySummaries`/`Picklists` sheet GIDs (placeholders in the JSON), connect the OpenAI credential, run the generator once.
+### Agent Productivity dashboard (`/admin/productivity`, Admin/Super Admin only)
+Phase 1 (built): per-agent Total/Inbound/Outbound/Answered/Missed calls, AHT (average duration of answered calls, currently blended inbound+outbound, not split), and Average Callback TAT (time between a missed inbound call and the next answered outbound call to that number, credited to whoever placed the callback — currently raw elapsed time, not working-hours-adjusted). All computed client-side from the existing Call Logs data, zero new backend.
 
-### Agent Guidance / Next-Best-Action coaching (built)
-Decided as **rule-based**, not LLM-generated — a lookup table, not a live AI call, so it's free, predictable, and editable directly in a sheet. Decided placement: **tooltip next to the active field** (an ⓘ icon, not a side panel or banner).
-- **`Guidance` Google Sheet tab** (new, same "OM CRM - PSRI" sheet) — columns `Call For`, `Field`, `Tip`, `Suggested Script`. Each row is a rule: for a given Call For value + a specific form field, show this coaching tip (why it matters for customer satisfaction/business outcome) and this suggested phrase to say.
-- **`n8n_psri_guidance_list.json`** (self-hosted) — `GET /psri-guidance`, same simple cached-read pattern.
-- **Frontend**: `GuidanceContext.jsx` (fetch-once) + a `GuidanceTip` component wired next to the **Call For**, **Priority**, **Summary**, **Specialty**, and **Appointment Date** field labels in `CasesPage.jsx` — click the ⓘ to reveal the tip + suggested script for the currently-selected Call For.
-- Still needed: paste the seed Guidance rows (given to the user as a paste-ready block) into the new `Guidance` tab, import/activate the workflow, set the sheet GID placeholder.
-
-## Doctor/Specialty Lookup &amp; Contact History (built)
-
-### Doctor &amp; Specialty Lookup — two independent workflows
-Both run on the **self-hosted** instance (`automation.openmindhelpline.com`) — confirmed working via direct Postman testing, not the cloud instance originally assumed. "By Doctor" and "By Specialty" are **two completely separate search flows** sharing one UI card, with no shared state or mixed logic between them:
-
-- **"By Doctor" tab** (`DoctorSearchTab` in `CasesPage.jsx`) → calls **Workflow 1 only**: `n8n_psri_doctor_lookup.json`, `POST /psri-doctor-search`. Webhook → Code (extract query) → Google Sheets (read `Doctors` tab) → Code (filter by doctor name + map every real column) → Code (build response) → Respond. Returns a flat list of matching doctors; click one for full detail (Education 1-3, Other Qualifications, Experience, Languages Known, Centre, OPD Schedule, Consultation Charges, Walk-In Protocol + count, CGHS Protocol, Specific Protocol, Block, Status).
-- **"By Specialty" tab** (`SpecialtySearchTab` in `CasesPage.jsx`) → calls **Workflow 2 only**: `n8n_psri_specialty_search.json`, `POST /psri-specialty-search`. Webhook → Code (extract specialty) → Google Sheets (same `Doctors` tab) → Code (filter by specialty + map doctors) → Code (build AI prompt) → HTTP Request to OpenAI (`gpt-4o`, live per search, not cached) → Code (parse JSON response) → Respond. Returns `{ success, specialty, summaryEn, summaryHi, doctors: [...] }` — an AI-generated English+Hindi explanation of the specialty plus every doctor under it, in one response.
-- **Note on overlap**: this live per-search AI generation is a *second*, separate source of specialty text from the already-built cached `SpecialtySummaries` system (used by the Appointment section's "About {Specialty}" toggle, generated once via batch job — see above). Not consolidated; both exist for different UI surfaces.
-- **`Doctors` Google Sheet tab** — confirmed real headers: `Sr. No.`, `Doctor Name`, `Specialty`, `Education 1`, `Education 2`, `Education 3`, `Other Qualifications`, `Experience`, `Languages Known`, `Centre`, `OPD Schedule`, `Consultation Charges`, `Walk-In Protocol`, `If Yes (Number of Walk-Ins Allowed)`, `CGHS Protocol`, `Any Specific Protocol`, `Block`, `Status`. Both workflows' field mappings use these exact names — no more guessing.
-- **`api/psri.js`** — `searchDoctors(query, searchBy)` and `searchSpecialty(specialty)`, both via the same self-hosted `BASE` (`/psri-webhook` proxy) — no separate cloud base needed.
-- Still needed: import/activate `n8n_psri_specialty_search.json`, connect its Google Sheets credential + an OpenAI Header Auth credential (same generic-header pattern as the Specialty Summary Generator workflow).
-
-### Contact History
-`ContactHistoryPanel` in `CasesPage.jsx` — past Cases for the selected Contact, reusing the existing Cases search (by mobile) rather than a new workflow; excludes the case currently being edited.
+Phase 2 (not started): Login/Break time tracking. Requires new infrastructure — we don't capture agent presence history anywhere today, only a live snapshot via SparkTG's `GET /api/v1/dashboard?svc-id=`. Would need a new scheduled n8n workflow polling that endpoint every 1–2 minutes, a new MySQL table logging status snapshots, and an aggregation step — accuracy bounded by the polling interval.
 
 ## Tariff Chatbot
+Agent-facing AI chat (💬 icon) answering billing/tariff questions from source documents via a LangChain agent (GPT-4.1-mini) + Supabase pgvector retrieval — not from memory.
 
-A call-center agent-facing chatbot that answers questions about PSRI's tariff schedule (room charges, OT, lab, packages, corporate rates, etc.) directly from the source documents.
+- **Source files** — Google Drive folder `10OCdknPRAng86Ecfod9Ngv7BMYRj1QVq` ("PSRI Tariff Docs"). The tariff **PDF is scanned/image-based — contributes zero extractable text**. All actual tariff content comes from the Excel file, which is ingested correctly (one row → one clean chunk, keeping a rate and its label together).
+- **Known accuracy gap** (open, not yet fixed): vector retrieval (`n8n_psri_tariff_tool.json`) only pulls `topK: 6` chunks per query — likely too few for compound/multi-category questions. Reported by the team as giving "incomplete and incorrect" answers; root cause not fully confirmed yet (topK vs. something else) — pending a fix.
+- **Workflows**: `n8n_psri_tariff_ingest.json` (2-day schedule, re-embeds everything), `n8n_psri_tariff_chat.json` (the chat endpoint, `POST /psri-tariff-chat`), `n8n_psri_tariff_tool.json` (sub-workflow: classify → vector search → extract answer).
 
-### Architecture
-- **Source files** — stored in Google Drive folder `10OCdknPRAng86Ecfod9Ngv7BMYRj1QVq` ("PSRI Tariff Docs"):
-  - Tariff PDF (`Tariff FY 2025-26 as on 31.03.25 (5) (11) (4).pdf`) — **NOTE: this PDF is scanned (image-based), not text-based. No text can be extracted from it.** All useful tariff content must come from the Excel file.
-  - Corporate/tariff Excel file — contains the actual rate data, works correctly.
-- **Vector store** — Supabase `psri_knowledge` table (see `PSRI/Workflows/psri_knowledge_schema.sql`). Data persists across n8n executions (unlike the earlier in-memory store which was wiped after each workflow run).
-- **Two n8n workflows**:
-  - `n8n_psri_tariff_ingest.json` — runs on 2-day schedule. Clears the `psri_knowledge` table first, then downloads files from Drive, splits into chunks, embeds via OpenAI, stores in Supabase.
-  - `n8n_psri_tariff_tool.json` — called as a sub-workflow by the main chat workflow. Classifies the query intent → identifies tariff categories → semantic search on `psri_knowledge` via `match_psri_knowledge()` → GPT-4.1-mini generates the answer from retrieved excerpts.
-
-### Supabase schema
-Table: `psri_knowledge(id, content, source, metadata jsonb, embedding vector(1536), created_at)`
-Function: `match_psri_knowledge(query_embedding, match_threshold=0.3, match_count=6)`
-Schema file: `PSRI/Workflows/psri_knowledge_schema.sql`
-
-**Important**: run `ALTER TABLE psri_knowledge ALTER COLUMN source DROP NOT NULL;` — the n8n Supabase vector store node does not set the `source` column on insert, so it must be nullable. This line is included at the bottom of the schema file.
-
-### Credential placeholders
-All three Supabase nodes in `n8n_psri_tariff_ingest.json` and the one in `n8n_psri_tariff_tool.json` use `REPLACE_WITH_SUPABASE_CREDENTIAL_ID` — replace with the actual n8n credential ID after import.
-
-### To populate for the first time
-1. Run the schema SQL in Supabase (including the `DROP NOT NULL` line)
-2. Import both workflow JSONs into n8n, replace credential IDs
-3. Run the ingest workflow manually once — check `psri_knowledge` in Supabase Table Editor for rows
-4. Test the tool workflow with a sample tariff question
-
-### Known limitation
-The tariff PDF is scanned (image-based) — the PDF loader extracts no text from it. Only the Excel file contributes data to the vector store. To fix: either obtain a text-based PDF from PSRI, OCR the existing PDF (open in Microsoft Word → save as new PDF), or add PDF-only content into the Excel file.
+## Known Lessons / Gotchas
+- **n8n MySQL nodes**: the `select` operation's dynamic column-picker throws `identifier.match is not a function` — always use `executeQuery` with hand-built, pre-escaped SQL strings instead. The "Query Parameters" feature silently doesn't bind (`?` placeholders reach MySQL literally) — build the complete SQL string in a preceding Code node instead. `alwaysOutputData: true` is required on every MySQL node, or n8n halts the whole workflow on a zero-row result.
+- **A workflow that dies mid-execution still returns HTTP 200 with an empty body** — the frontend's `parseOrThrow()` helper in `src/api/psri.js` treats an empty/unparseable body as an error specifically because of this; don't assume a 200 means success.
+- **n8n workflow files are gitignored** — every change to `PSRI/Workflows/*.json` requires a manual re-import + credential rebind in n8n; nothing there deploys automatically with `git push`.
+- **n8n field-mapping doesn't always survive JSON import** — verify Insert/Update/Append field mappings after import, same as credentials.
+- **SparkTG's webhook self-service wasn't available** on this account's admin panel — required emailing SparkTG support directly with the target URL and service ID to get it configured.
 
 ## Pending Items
+- **Tariff Bot accuracy** — `topK` bump and possibly chunking strategy, pending confirmation from the team on which questions are failing.
+- **Productivity Phase 2** — Login/Break time tracking, needs new SparkTG-status-polling infrastructure (see Telephony section).
+- **Working-hours-adjusted Callback TAT** — currently raw elapsed time; should exclude off-hours gaps.
+- **AHT split by direction** — currently blended inbound+outbound.
+- **VMM's SparkTG webhook** — configuration email sent to SparkTG support, awaiting their reply.
 - **Leads module** — explicitly deferred until Cases is solid; not yet scoped.
-- **Google Maps city autocomplete** — discussed as a "nice to have" for the Country/State/City cascade; needs a Google Maps API key (billing-enabled) that doesn't exist yet — not started.
-- **Real picklist & dependency data** — most lists currently only have a few test values; full PSRI-specific taxonomy (Type of Call → Call For → Type of Enquiry hierarchy from the original Vtiger pivot export) still needs to be entered via the admin pages.
-- **147k historical Contacts** — were bulk-loaded directly into the original Google Sheet before the Supabase migration; need to be re-migrated into the Supabase `contacts` table (e.g. via CSV export/import in Supabase's Table Editor).
+- **Google Maps city autocomplete** — "nice to have," needs a billing-enabled API key that doesn't exist yet.
 
 ## Key Files
-- `universal-crm/` — React app source (shell: `src/App.jsx`, `src/components/ProjectRail.jsx`; PSRI pages: `src/projects/psri/`; admin pages: `src/admin/`; shared contexts: `src/context/`)
-- `PSRI/Workflows/*.json` — all n8n workflow exports (local only, not in git)
+- `universal-crm/` — React app source (shell: `src/App.jsx`, `src/components/ProjectRail.jsx`; PSRI pages: `src/projects/psri/`; admin pages: `src/admin/`; shared contexts: `src/context/`; API layer: `src/api/psri.js`)
+- `PSRI/Workflows/*.json` — all n8n workflow exports (local only, gitignored)
+- `PSRI/mysql_schema.sql` — Contacts/Cases DDL reference (not the live `call_logs` schema, which evolved ad hoc during the telephony build)
+- `PSRI/PSRI_PROGRESS_LOG.md` — daily progress log for management updates
