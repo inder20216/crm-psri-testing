@@ -359,7 +359,7 @@ export default function CasesPage() {
   const [calledSameAsContact, setCalledSameAsContact] = useState(false);
   const [dialerPrefillMobile,   setDialerPrefillMobile]   = useState('');
   const [autoOpenQuickAdd,      setAutoOpenQuickAdd]      = useState(false);
-  const { currentUser } = useAuth();
+  const { currentUser, isAdmin } = useAuth();
   const currentAgentId = currentUser?.id || '';
   const [aiPolishing, setAiPolishing]     = useState(false);
   const [aiChecking, setAiChecking]       = useState(false);
@@ -460,6 +460,9 @@ export default function CasesPage() {
         typeOfCall: dialerPrefill.typeOfCall || rep.typeOfCall,
         callTxnId:  dialerPrefill.callTxnId  || '',
         contact:    dialerPrefill.contact    || rep.contact,
+        // A brand-new case starts assigned to whoever's handling it now,
+        // not whoever the earlier historical case happened to belong to.
+        assignedTo: currentAgentId,
       });
       setDialerPrefillMobile('');
       setAutoOpenQuickAdd(false);
@@ -967,13 +970,15 @@ export default function CasesPage() {
           </div>
 
           <div className="psri-bottom-meta">
-            <div className="psri-field" style={{ maxWidth: 300 }}>
-              <label>Assigned To</label>
-              <select value={form.assignedTo} onChange={e => setForm(f => ({ ...f, assignedTo: e.target.value }))}>
-                <option value="">— Unassigned —</option>
-                {users.map(u => <option key={u.id} value={u.id}>{u.name} ({u.role})</option>)}
-              </select>
-            </div>
+            {isAdmin && (
+              <div className="psri-field" style={{ maxWidth: 300 }}>
+                <label>Assigned To</label>
+                <select value={form.assignedTo} onChange={e => setForm(f => ({ ...f, assignedTo: e.target.value }))}>
+                  <option value="">— Unassigned —</option>
+                  {users.map(u => <option key={u.id} value={u.id}>{u.name} ({u.role})</option>)}
+                </select>
+              </div>
+            )}
             <div className="psri-field" style={{ maxWidth: 220 }}>
               <label>Query Type</label>
               <select value={form.queryType} onChange={e => setForm(f => ({ ...f, queryType: e.target.value }))}>
