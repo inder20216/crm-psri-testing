@@ -2,6 +2,7 @@ import ContactsPage from './psri/ContactsPage';
 import CasesPage from './psri/CasesPage';
 import CallLogsPage from './psri/CallLogsPage';
 import IncompleteCasesPage from './psri/IncompleteCasesPage';
+import ProspectsPage from './psri/ProspectsPage';
 import VmmHome from './vmm/VmmHome';
 
 // Central registry of all projects in the universal CRM.
@@ -16,6 +17,7 @@ export const PROJECTS = [
       { path: '/contacts',          label: 'Contacts',          icon: '👤', element: <ContactsPage /> },
       { path: '/cases',             label: 'Cases',             icon: '🗂️', element: <CasesPage /> },
       { path: '/incomplete-cases',  label: 'Incomplete Cases',  icon: '📝', element: <IncompleteCasesPage /> },
+      { path: '/prospects',         label: 'Prospects',         icon: '🎯', element: <ProspectsPage /> },
       { path: '/call-logs',         label: 'Call Logs',         icon: '☎️', element: <CallLogsPage /> },
     ],
   },

@@ -79,4 +79,16 @@ export const psri = {
   getCallLogs: (opts) => get('psri-call-logs', typeof opts === 'string' ? { q: opts } : (opts || {}))
     .then(d => (d && d.success ? d.callLogs : []))
     .catch(err => { console.warn('[telephony] getCallLogs failed:', err.message); return []; }),
+
+  // Prospects — unconverted "Enquiry or Transfer" leads, one row per contact,
+  // maintained server-side by n8n_psri_case_add_mysql.json as cases come in.
+  getProspects: (opts) => get('psri-prospects', typeof opts === 'string' ? { status: opts } : (opts || {}))
+    .then(d => (d && d.success ? d.prospects : []))
+    .catch(err => { console.warn('[prospects] getProspects failed:', err.message); return []; }),
+  updateProspect:        (data) => post('psri-prospect-update', data),
+  recordProspectCallAttempt: (data) => post('psri-prospect-call-attempt', data)
+    .catch(err => console.warn('[prospects] call attempt log failed:', err.message)),
+  getProspectActivity: (prospectId) => get('psri-prospect-activity', { prospectId })
+    .then(d => (d && d.success ? d.activity : []))
+    .catch(err => { console.warn('[prospects] getProspectActivity failed:', err.message); return []; }),
 };
