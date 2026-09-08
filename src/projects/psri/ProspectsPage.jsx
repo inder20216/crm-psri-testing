@@ -123,7 +123,10 @@ export default function ProspectsPage() {
         finalStatus: edit.finalStatus,
         nextCallAt: edit.nextCallAt ? edit.nextCallAt.replace('T', ' ') + ':00' : '',
         remarks: edit.remarks,
-        assignedTo: isAdmin ? edit.assignedTo : selected.assignedTo,
+        // Same auto-capture as Cases: whoever actually saves the update
+        // becomes the assignee, reflecting who's currently working the
+        // lead rather than a frozen original owner. Admins can reassign.
+        assignedTo: isAdmin ? edit.assignedTo : (currentUser?.id || ''),
       });
       showToast('Prospect updated');
       await refresh();

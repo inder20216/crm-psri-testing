@@ -573,7 +573,12 @@ export default function CasesPage() {
       contactId: form.contact.id, contactName: form.contact.name, contactMobile: form.contact.mobile,
       channel: form.channel, calledNumber: form.calledNumber, callTxnId: form.callTxnId,
       typeOfCall: form.typeOfCall, callFor: form.callFor, typeOfEnquiry: form.typeOfEnquiry,
-      priority: form.priority, queryType: form.queryType, status: 'Resolved', summary: form.summary, assignedTo: form.assignedTo,
+      priority: form.priority, queryType: form.queryType, status: 'Resolved', summary: form.summary,
+      // Regular agents never see this field — it auto-stamps whoever is
+      // actually working the case right now, on every save (not just at
+      // creation), so it reflects current ownership rather than staying
+      // frozen at whoever first created it. Admins can still reassign freely.
+      assignedTo: isAdmin ? form.assignedTo : currentAgentId,
       isAppointment: form.callFor === 'Appointment',
       specialty: form.specialty, doctorName: form.doctorName,
       specificDoctorRequested: form.specificDoctorRequested,
