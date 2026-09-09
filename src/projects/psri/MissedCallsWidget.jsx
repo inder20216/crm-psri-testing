@@ -80,7 +80,7 @@ export default function MissedCallsWidget() {
 
   return (
     <div className="mc-bar" title="Missed Calls — click a stage to call back the oldest one first (FIFO)">
-      {[1, 2, 3].map(stage => (
+      {[1, 2].map(stage => (
         <button
           key={stage}
           type="button"
