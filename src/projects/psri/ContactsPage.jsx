@@ -438,7 +438,8 @@ export default function ContactsPage() {
                 <div className="psri-detail-item"><span>Country</span><strong>{findCountry(selected.country).name}</strong></div>
                 <div className="psri-detail-item"><span>State</span><strong>{selected.state || '—'}</strong></div>
                 <div className="psri-detail-item"><span>City</span><strong>{selected.city || '—'}</strong></div>
-                <div className="psri-detail-item"><span>Source</span><strong>{selected.source || '—'}{selected.subSource ? ` — ${selected.subSource}` : ''}</strong></div>
+                <div className="psri-detail-item"><span>Source of Information</span><strong>{selected.source || '—'}</strong></div>
+                <div className="psri-detail-item"><span>Sub Source of Information</span><strong>{selected.subSource || '—'}</strong></div>
                 <div className="psri-detail-item"><span>Language</span><strong>{selected.language || '—'}</strong></div>
                 <div className="psri-detail-item"><span>Assigned To</span><strong>{users.find(u => u.id === selected.assignedTo)?.name || '—'}</strong></div>
               </div>
