@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { psri } from '../../api/psri';
 import { usePicklists } from '../../context/PicklistsContext';
+import { useDependencies } from '../../context/DependenciesContext';
 import { useUsers } from '../../context/UsersContext';
 import { COUNTRIES, findCountry } from '../../data/countries';
 import { INDIA_STATES, INDIA_STATE_NAMES } from '../../data/indiaStates';
@@ -14,12 +15,20 @@ function titleCase(s) {
   return (s || '').trim().replace(/\s+/g, ' ').replace(/\w\S*/g, w => w[0].toUpperCase() + w.slice(1).toLowerCase());
 }
 
+// Value-to-value dependency lookup (e.g. Source=Digital → Sub Source=Google), with a
+// fallback to the flat base picklist if no dependency pairs exist yet for that value.
+function getDependentOptions(getDependentValues, getList, subField, mainField, mainValue) {
+  const specific = getDependentValues(subField, mainField, mainValue);
+  if (specific.length > 0) return specific;
+  return getList(subField);
+}
+
 const quickEmptyForm = {
   salutation: 'Mr.', name: '', age: '',
   mobileIsd: '+91', mobile: '', altMobileIsd: '+91', altMobile: '', landlineIsd: '+91', landline: '',
   email: '',
   country: 'IN', state: '', city: '',
-  contactType: '', source: '', language: '',
+  contactType: '', source: '', subSource: '', language: '',
   assignedTo: '', notes: '',
 };
 
@@ -55,6 +64,7 @@ function withCurrentValue(list, current) {
 
 export default function ContactPicker({ onSelect, selected, initialQuery = '', autoOpenQuickAdd = false }) {
   const { getList } = usePicklists();
+  const { getDependentValues } = useDependencies();
   const { users } = useUsers();
   const [query, setQuery]       = useState(initialQuery);
   const [results, setResults]   = useState([]);
@@ -301,9 +311,20 @@ export default function ContactPicker({ onSelect, selected, initialQuery = '', a
                 </div>
                 <div className="psri-field">
                   <label>Source of Information</label>
-                  <select value={quickForm.source} onChange={e => setQuickForm(f => ({ ...f, source: e.target.value }))}>
+                  <select value={quickForm.source} onChange={e => setQuickForm(f => ({ ...f, source: e.target.value, subSource: '' }))}>
                     <option value="">— Select —</option>
                     {getList('Source of Information').map(s => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                </div>
+                <div className="psri-field">
+                  <label>Sub Source of Information</label>
+                  <select
+                    value={quickForm.subSource}
+                    disabled={!quickForm.source}
+                    onChange={e => setQuickForm(f => ({ ...f, subSource: e.target.value }))}
+                  >
+                    <option value="">{quickForm.source ? '— Select —' : '— Select Source first —'}</option>
+                    {quickForm.source ? getDependentOptions(getDependentValues, getList, 'Sub Source of Information', 'Source of Information', quickForm.source).map(s => <option key={s} value={s}>{s}</option>) : null}
                   </select>
                 </div>
                 <div className="psri-field">
