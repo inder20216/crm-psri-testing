@@ -31,9 +31,13 @@ function computeMissedCalls(callLogs) {
     let failedAttempts = 0;
 
     for (const c of chrono) {
-      const noDuration = !(Number(c.durationSeconds) > 0);
-      const isMissedDisposition = (c.disposition || '').trim().toUpperCase() === 'MISSED';
-      const answered = !noDuration && !isMissedDisposition;
+      // duration_seconds, not disposition — SparkTG's disposition vocabulary
+      // isn't fixed (Queue Missed, IVR Missed, Agent Missed, NoAnswer, ...
+      // today, possibly more tomorrow), so string-matching it always has a
+      // stale-list bug waiting to happen. A call that was actually picked up
+      // has a duration no matter what SparkTG calls the outcome. Same rule
+      // psri-telephony-service already uses server-side — keep in sync.
+      const answered = Number(c.durationSeconds) > 0;
       if (answered) { streakStart = null; failedAttempts = 0; continue; }
       if (c.direction === 'inbound') {
         if (!streakStart) streakStart = c;
