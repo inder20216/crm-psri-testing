@@ -8,6 +8,7 @@ export const KNOWN_RELATIONSHIPS = [
   { mainField: 'Call For',     subField: 'Appointment Status' },
   { mainField: 'Type of Call', subField: 'Call For' },
   { mainField: 'Channel',      subField: 'Call For' },
+  { mainField: 'Source of Information', subField: 'Sub Source of Information' },
 ];
 
 const DependenciesContext = createContext(null);
