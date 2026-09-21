@@ -1,6 +1,7 @@
-import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { psri } from '../../api/psri';
 import { useUsers } from '../../context/UsersContext';
+import { useAuth } from '../../context/AuthContext';
 import { buildAgentNumberMap, resolveAgentLabel } from './agentResolve';
 import './Psri.css';
 
@@ -29,21 +30,107 @@ function typeLabel(direction) {
   return '—';
 }
 
+// Same country-code stripping SparkTGContext uses on the way in — the
+// webhook can hand back a number as +9198…, 9198…, or bare 10-digit, and
+// none of those should fail to match the agent's own stored 10-digit number.
+function normalizePhone(raw) {
+  if (!raw) return '';
+  const s = String(raw).replace(/[\s\-()]/g, '');
+  if (/^\+91(\d{10})$/.test(s)) return s.slice(3);
+  if (/^91(\d{10})$/.test(s))   return s.slice(2);
+  if (/^0(\d{10})$/.test(s))    return s.slice(1);
+  return s;
+}
+
+const startOfDay = (d) => { const x = new Date(d); x.setHours(0, 0, 0, 0); return x; };
+const endOfDay   = (d) => { const x = new Date(d); x.setHours(23, 59, 59, 999); return x; };
+const toInputDate = (d) => {
+  const x = new Date(d);
+  return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`;
+};
+
+const RANGE_OPTIONS = [
+  { value: 'all',       label: 'All Time' },
+  { value: 'today',     label: 'Today' },
+  { value: 'yesterday', label: 'Yesterday' },
+  { value: 'last7',     label: 'Last 7 Days' },
+  { value: 'thisMonth', label: 'Current Month' },
+  { value: 'custom',    label: 'Custom Range' },
+];
+
+// The backend only understands "give me the last N days" (no arbitrary
+// from/to), so every preset below resolves to an exact [start, end]
+// boundary for precise client-side filtering, plus a days-back count wide
+// enough for the server fetch to actually contain that boundary. 'all'
+// omits daysBack entirely so the server applies no day restriction at all
+// (just its own row limit).
+function resolveRange(rangeType, customFrom, customTo) {
+  const now = new Date();
+  if (rangeType === 'all') {
+    return { start: new Date(0), end: endOfDay(now), daysBack: undefined };
+  }
+  if (rangeType === 'yesterday') {
+    const y = new Date(now); y.setDate(y.getDate() - 1);
+    return { start: startOfDay(y), end: endOfDay(y), daysBack: 2 };
+  }
+  if (rangeType === 'last7') {
+    const s = new Date(now); s.setDate(s.getDate() - 6);
+    return { start: startOfDay(s), end: endOfDay(now), daysBack: 7 };
+  }
+  if (rangeType === 'thisMonth') {
+    const s = new Date(now.getFullYear(), now.getMonth(), 1);
+    return { start: startOfDay(s), end: endOfDay(now), daysBack: now.getDate() };
+  }
+  if (rangeType === 'custom') {
+    let s = customFrom ? startOfDay(new Date(customFrom)) : startOfDay(now);
+    let e = customTo ? endOfDay(new Date(customTo)) : endOfDay(now);
+    if (e < s) { const t = s; s = e; e = t; }
+    const daysBack = Math.min(400, Math.max(1, Math.ceil((endOfDay(now) - s) / 86400000) + 1));
+    return { start: s, end: e, daysBack };
+  }
+  // 'today' and fallback
+  return { start: startOfDay(now), end: endOfDay(now), daysBack: 1 };
+}
+
 export default function CallLogsPage() {
   const { users } = useUsers();
+  const { currentUser, isAdmin } = useAuth();
   const [query, setQuery] = useState('');
+  const [rangeType, setRangeType] = useState('all');
+  const [customFrom, setCustomFrom] = useState(toInputDate(new Date()));
+  const [customTo, setCustomTo] = useState(toInputDate(new Date()));
+  const [scope, setScope] = useState('all'); // 'mine' | 'all' — only agents with admin rights can switch this; non-admins are always 'mine'
+  const [callType, setCallType] = useState('all'); // 'all' | 'inbound' | 'outbound'
+  const [dispositionFilter, setDispositionFilter] = useState('all');
   const [calls, setCalls] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadErr, setLoadErr] = useState('');
-  const debounceRef = useRef(null);
 
   const nameByNumber = useMemo(() => buildAgentNumberMap(users), [users]);
   const agentLabel = (c) => resolveAgentLabel(c, nameByNumber);
 
-  const refresh = useCallback((q) => {
+  const { start, end, daysBack } = useMemo(
+    () => resolveRange(rangeType, customFrom, customTo),
+    [rangeType, customFrom, customTo]
+  );
+
+  // A call belongs to the signed-in agent if it was logged under their email
+  // (browser-capture path) or their own phone/extension (SparkTG webhook
+  // path) — the two capture paths don't share a common field, so both are
+  // checked rather than relying on the display-label resolution above.
+  const isMine = useCallback((c) => {
+    if (!currentUser) return false;
+    if (c.agentEmail) return c.agentEmail.toLowerCase() === (currentUser.email || '').toLowerCase();
+    if (c.agentNumber) {
+      return normalizePhone(c.agentNumber) === normalizePhone(currentUser.contact) || c.agentNumber === currentUser.sparktgExtension;
+    }
+    return false;
+  }, [currentUser]);
+
+  const refresh = useCallback((daysParam) => {
     setLoading(true);
     setLoadErr('');
-    return psri.getCallLogs(q)
+    return psri.getCallLogs({ days: daysParam, limit: 5000 })
       .then(async (rows) => {
         // Bulk-fetch the cases linked to these calls in one shot (not one
         // lookup per row) and stitch them back on, so this page becomes the
@@ -75,25 +162,57 @@ export default function CallLogsPage() {
       .finally(() => setLoading(false));
   }, []);
 
-  useEffect(() => {
-    clearTimeout(debounceRef.current);
-    const q = query.trim();
-    debounceRef.current = setTimeout(() => refresh(q), q ? 300 : 0);
-    return () => clearTimeout(debounceRef.current);
-  }, [query, refresh]);
+  useEffect(() => { refresh(daysBack); }, [daysBack, refresh]);
+
+  // Built from whatever's actually in the loaded rows rather than a fixed
+  // list — SparkTG's disposition vocabulary isn't fixed (Queue Missed, IVR
+  // Missed, Agent Missed, NoAnswer, ... today, possibly more tomorrow), so
+  // hardcoding the option list here would just be the same stale-list bug
+  // as the answered/missed classifier, one layer up.
+  const dispositionOptions = useMemo(() => {
+    const seen = new Set();
+    calls.forEach(c => { if (c.disposition) seen.add(c.disposition); });
+    return [...seen].sort((a, b) => a.localeCompare(b));
+  }, [calls]);
+
+  // A selected disposition value can disappear from the loaded rows after a
+  // refresh or date-range change (e.g. no "Queue Missed" calls in the new
+  // range) — rather than silently filtering everything out, treat a
+  // selection that's no longer a real option as "all".
+  const effectiveDispositionFilter = dispositionOptions.includes(dispositionFilter) ? dispositionFilter : 'all';
+
+  const visible = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return calls.filter(c => {
+      const started = c.startedAt ? new Date(c.startedAt) : null;
+      if (!started || started < start || started > end) return false;
+      if (!isAdmin || scope === 'mine') { if (!isMine(c)) return false; }
+      if (callType !== 'all' && c.direction !== callType) return false;
+      if (effectiveDispositionFilter !== 'all' && c.disposition !== effectiveDispositionFilter) return false;
+      if (!q) return true;
+      return (
+        (c.phone || '').includes(q) ||
+        (c.contactName || '').toLowerCase().includes(q) ||
+        agentLabel(c).toLowerCase().includes(q) ||
+        statusLabel(c).toLowerCase().includes(q)
+      );
+    });
+  }, [calls, start, end, query, scope, isAdmin, isMine, callType, effectiveDispositionFilter, nameByNumber]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="psri-page">
       <div className="psri-page-head">
         <div>
           <h1 className="psri-title">Call Logs</h1>
-          <p className="psri-subtitle">PSRI Hospital — Full Call History</p>
+          <p className="psri-subtitle">
+            {isAdmin && scope === 'all' ? 'PSRI Hospital — Full Call History' : 'Your Call History'}
+          </p>
         </div>
       </div>
 
       {loadErr && <div className="psri-err-banner">{loadErr}</div>}
 
-      <div className="psri-search-row">
+      <div className="psri-search-row" style={{ flexWrap: 'wrap', rowGap: 10 }}>
         <input
           className="psri-search-input"
           type="text"
@@ -101,16 +220,59 @@ export default function CallLogsPage() {
           value={query}
           onChange={e => setQuery(e.target.value)}
         />
-        <button type="button" className="psri-btn-ghost" onClick={() => refresh(query.trim())}>↻ Refresh</button>
-        <span className="psri-count">{calls.length} call{calls.length !== 1 ? 's' : ''}</span>
+        <select
+          value={rangeType}
+          onChange={e => setRangeType(e.target.value)}
+          style={{ padding: '10px 14px', borderRadius: 10, border: '1.5px solid var(--psri-border)', fontSize: 13, fontWeight: 600 }}
+        >
+          {RANGE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+        </select>
+        {rangeType === 'custom' && (
+          <>
+            <input type="date" value={customFrom} max={customTo} onChange={e => setCustomFrom(e.target.value)}
+              style={{ padding: '9px 12px', borderRadius: 10, border: '1.5px solid var(--psri-border)', fontSize: 13 }} />
+            <span className="cp-hint">to</span>
+            <input type="date" value={customTo} min={customFrom} onChange={e => setCustomTo(e.target.value)}
+              style={{ padding: '9px 12px', borderRadius: 10, border: '1.5px solid var(--psri-border)', fontSize: 13 }} />
+          </>
+        )}
+        {isAdmin && (
+          <select
+            value={scope}
+            onChange={e => setScope(e.target.value)}
+            style={{ padding: '10px 14px', borderRadius: 10, border: '1.5px solid var(--psri-border)', fontSize: 13, fontWeight: 600 }}
+          >
+            <option value="mine">My Calls</option>
+            <option value="all">All Agents</option>
+          </select>
+        )}
+        <select
+          value={callType}
+          onChange={e => setCallType(e.target.value)}
+          style={{ padding: '10px 14px', borderRadius: 10, border: '1.5px solid var(--psri-border)', fontSize: 13, fontWeight: 600 }}
+        >
+          <option value="all">All Call Types</option>
+          <option value="inbound">Inbound</option>
+          <option value="outbound">Outbound</option>
+        </select>
+        <select
+          value={effectiveDispositionFilter}
+          onChange={e => setDispositionFilter(e.target.value)}
+          style={{ padding: '10px 14px', borderRadius: 10, border: '1.5px solid var(--psri-border)', fontSize: 13, fontWeight: 600 }}
+        >
+          <option value="all">All Dispositions</option>
+          {dispositionOptions.map(d => <option key={d} value={d}>{d}</option>)}
+        </select>
+        <button type="button" className="psri-btn-ghost" onClick={() => refresh(daysBack)}>↻ Refresh</button>
+        <span className="psri-count">{visible.length} call{visible.length !== 1 ? 's' : ''}</span>
       </div>
 
       {loading && <div className="psri-empty">Loading…</div>}
-      {!loading && !loadErr && calls.length === 0 && (
-        <div className="psri-empty">No calls found. Try a different search, or check back once calls start coming in.</div>
+      {!loading && !loadErr && visible.length === 0 && (
+        <div className="psri-empty">No calls found for this range. Try a different search or date range.</div>
       )}
 
-      {!loading && calls.length > 0 && (
+      {!loading && visible.length > 0 && (
         <div className="psri-table-wrap">
           <table className="psri-table">
             <thead>
@@ -130,7 +292,7 @@ export default function CallLogsPage() {
               </tr>
             </thead>
             <tbody>
-              {calls.map(c => (
+              {visible.map(c => (
                 <tr key={c.callTxnId}>
                   <td className="cp-hint">{c.callTxnId || '—'}</td>
                   <td>{fmtWhen(c.startedAt) || '—'}</td>
