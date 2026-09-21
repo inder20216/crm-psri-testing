@@ -9,6 +9,28 @@ export const KNOWN_LISTS = [
   'Type of Complaint', 'Type of Emergency',
 ];
 
+// Default values for critical picklists to ensure agents always have options
+// even before they are populated in the Google Sheets Picklists tab.
+export const DEFAULT_PICKLISTS = {
+  'Source of Information': [
+    'Google Search',
+    'Doctor Referral',
+    'Friend / Relative (Word of Mouth)',
+    'Existing Patient / Revisit',
+    'Social Media (Facebook / Instagram / YouTube)',
+    'Newspaper / Print Ad',
+    'Hoarding / Outdoor Banner',
+    'Hospital Website',
+    'Corporate / TPA Tie-up',
+    'Health Camp / Outreach Event',
+    'TV / Radio',
+    'Practo / Online Directory',
+    'Walk-in / Direct Visit',
+    'SMS / WhatsApp Campaign',
+    'Other',
+  ],
+};
+
 const PicklistsContext = createContext(null);
 
 export function PicklistsProvider({ children }) {
@@ -27,7 +49,16 @@ export function PicklistsProvider({ children }) {
 
   useEffect(() => { refresh(); }, [refresh]);
 
-  const getList = (listName) => picklists[listName] || [];
+  const getList = (listName) => {
+    const fromSheet = picklists[listName] || [];
+    const defaults = DEFAULT_PICKLISTS[listName] || [];
+    if (fromSheet.length === 0) return defaults;
+    const merged = [...fromSheet];
+    defaults.forEach(d => {
+      if (!merged.some(m => m.toLowerCase() === d.toLowerCase())) merged.push(d);
+    });
+    return merged;
+  };
 
   const addValue = async (listName, value) => {
     try {

@@ -10,10 +10,15 @@ const DAY_OPTIONS = [
   { value: 30, label: 'Last 30 days' },
 ];
 
+// SparkTG's disposition vocabulary isn't fixed (Queue Missed, IVR Missed,
+// Agent Missed, NoAnswer, ... today, possibly more labels tomorrow) — string
+// matching against it always has a stale-list bug waiting to happen.
+// duration_seconds doesn't have that problem: a call that was actually
+// picked up and talked on has one, whatever SparkTG decides to call the
+// outcome. Same rule psri-telephony-service already uses server-side for
+// the missed-call streak state machine — keep this in sync with that.
 function isAnswered(call) {
-  const noDuration = !(Number(call.durationSeconds) > 0);
-  const isMissed = (call.disposition || '').trim().toUpperCase() === 'MISSED';
-  return !noDuration && !isMissed;
+  return Number(call.durationSeconds) > 0;
 }
 
 function fmtMMSS(sec) {
