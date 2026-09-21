@@ -307,9 +307,13 @@ function AiAdvisorPanel({ form, onCheck, checking, result, err }) {
 
 const emptyForm = {
   id: '', contact: null,
-  channel: '', calledNumber: '', callTxnId: '',
-  typeOfCall: '', callFor: '', typeOfEnquiry: '',
-  priority: '', queryType: '', status: 'Resolved', summary: '', assignedTo: '',
+  // Defaults reflect the most common real-world case: an inbound call with
+  // a plain (not detailed) enquiry — the agent shouldn't have to pick these
+  // manually every time. Real call direction (from the dialer/webhook) still
+  // overrides typeOfCall further down when a genuine call comes in.
+  channel: 'Call', calledNumber: '', callTxnId: '',
+  typeOfCall: 'Inbound', callFor: '', typeOfEnquiry: '',
+  priority: '', queryType: 'Basic', status: 'Resolved', summary: '', assignedTo: '',
   specialty: '', doctorName: '', specificDoctorRequested: false,
   appointmentDate: '', appointmentTime: '', appointmentStatus: '',
   typeOfComplaint: '',
@@ -349,7 +353,8 @@ export default function CasesPage() {
   const [loading, setLoading]   = useState(true);
   const [loadErr, setLoadErr]   = useState('');
   const [query, setQuery]       = useState('');
-  const [selected, setSelected] = useState(null);
+  const [selectedKey, setSelectedKey] = useState(null);
+  const [expandedCaseIds, setExpandedCaseIds] = useState(new Set());
   const [showForm, setShowForm] = useState(false);
   const [form, setForm]         = useState(emptyForm);
   const [errors, setErrors]     = useState({});
@@ -486,18 +491,57 @@ export default function CasesPage() {
     setShowForm(true);
   }, [dialerPrefill, setDialerPrefill]);
 
-  const filtered = useMemo(() => {
+  // One card per patient instead of one per case — a patient who's called in
+  // five times used to show up as five identical-looking rows. Grouped by
+  // contactId (falling back to mobile for older rows saved before that FK
+  // existed), newest activity first, with the full case list attached so the
+  // detail pane can show complete history instead of a single case.
+  const patientGroups = useMemo(() => {
+    const groups = new Map();
+    for (const c of cases) {
+      const key = c.contactId || c.contactMobile || c.id;
+      if (!groups.has(key)) {
+        groups.set(key, { key, contactId: c.contactId, contactName: c.contactName, contactMobile: c.contactMobile, cases: [] });
+      }
+      groups.get(key).cases.push(c);
+    }
+    const all = Array.from(groups.values()).map(g => {
+      const sorted = [...g.cases].sort((a, b) => new Date(b.created || 0) - new Date(a.created || 0));
+      return { ...g, cases: sorted, latest: sorted[0] };
+    });
+    all.sort((a, b) => new Date(b.latest?.created || 0) - new Date(a.latest?.created || 0));
+
     const q = query.trim().toLowerCase();
-    if (!q) return cases;
-    return cases.filter(c =>
+    if (!q) return all;
+    return all.filter(g => g.cases.some(c =>
       (c.contactName || '').toLowerCase().includes(q) ||
       (c.contactMobile || '').includes(q) ||
       (c.summary || '').toLowerCase().includes(q) ||
       (c.id || '').toLowerCase().includes(q)
-    );
+    ));
   }, [cases, query]);
 
+  const selectedGroup = useMemo(
+    () => patientGroups.find(g => g.key === selectedKey) || null,
+    [patientGroups, selectedKey]
+  );
+
+  const toggleCaseExpand = (id) => {
+    setExpandedCaseIds(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
+
   const openNew  = () => { setForm({ ...emptyForm, status: 'Resolved', assignedTo: currentAgentId }); setErrors({}); setSaveErr(''); setCalledSameAsContact(false); setShowForm(true); };
+  const openNewForPatient = (group) => {
+    setForm({
+      ...emptyForm, status: 'Resolved', assignedTo: currentAgentId,
+      contact: { id: group.contactId, name: group.contactName, mobile: group.contactMobile, mobileIsd: '+91' },
+    });
+    setErrors({}); setSaveErr(''); setCalledSameAsContact(false); setShowForm(true);
+  };
   const openEdit = (c) => {
     const mapped = fromApiCase(c);
     setForm(mapped);
@@ -1004,7 +1048,7 @@ export default function CasesPage() {
                     + Add Another Appointment
                   </button>
                 )}
-                <button type="button" className="psri-btn-primary" onClick={() => { setShowForm(false); setSelected(null); setSaved(false); setAiCheckResult(null); }}>Done</button>
+                <button type="button" className="psri-btn-primary" onClick={() => { setShowForm(false); setSelectedKey(null); setSaved(false); setAiCheckResult(null); }}>Done</button>
               </>
             ) : (
               <>
@@ -1072,34 +1116,36 @@ export default function CasesPage() {
           onChange={e => setQuery(e.target.value)}
         />
         <button className="psri-btn-primary" onClick={openNew} style={{ flexShrink: 0 }}>+ New Case</button>
-        <span className="psri-count">{filtered.length} case{filtered.length !== 1 ? 's' : ''}</span>
+        <span className="psri-count">
+          {patientGroups.length} patient{patientGroups.length !== 1 ? 's' : ''} &middot; {patientGroups.reduce((n, g) => n + g.cases.length, 0)} case{patientGroups.reduce((n, g) => n + g.cases.length, 0) !== 1 ? 's' : ''}
+        </span>
       </div>
 
       <div className="psri-layout">
         <div className="psri-list">
           {loading && <div className="psri-empty">Loading cases…</div>}
-          {!loading && !loadErr && filtered.length === 0 && (
+          {!loading && !loadErr && patientGroups.length === 0 && (
             <div className="psri-empty">No cases found. Try a different search or create a new case.</div>
           )}
-          {!loading && filtered.map(c => (
-            <div key={c.id} className={`psri-contact-card ${selected?.id === c.id ? 'active' : ''}`} onClick={() => setSelected(c)}>
-              <div className="psri-avatar">{(c.contactName || '?').trim().split(/\s+/).slice(0, 2).map(s => s[0]?.toUpperCase()).join('')}</div>
+          {!loading && patientGroups.map(g => (
+            <div key={g.key} className={`psri-contact-card ${selectedKey === g.key ? 'active' : ''}`} onClick={() => setSelectedKey(g.key)}>
+              <div className="psri-avatar">{(g.contactName || '?').trim().split(/\s+/).slice(0, 2).map(s => s[0]?.toUpperCase()).join('')}</div>
               <div className="psri-contact-main">
-                <div className="psri-contact-name">{c.contactName || 'Unknown Contact'}</div>
+                <div className="psri-contact-name">{g.contactName || 'Unknown Contact'}</div>
                 <div className="psri-contact-meta">
                   <span>
-                    {c.contactMobile}
-                    {hasWidget && c.contactMobile && (
+                    {g.contactMobile}
+                    {hasWidget && g.contactMobile && (
                       <button
                         className="stg-c2c-btn"
-                        title={`Call ${c.contactMobile}`}
-                        onClick={e => { e.stopPropagation(); dial(c.contactMobile); }}
+                        title={`Call ${g.contactMobile}`}
+                        onClick={e => { e.stopPropagation(); dial(g.contactMobile); }}
                       >&#128222;</button>
                     )}
                   </span>
-                  {c.status && <span className="psri-badge">{c.status}</span>}
-                  {c.priority && <span className="psri-badge">{c.priority}</span>}
-                  {c.queryType && <span className="psri-badge">{c.queryType}</span>}
+                  {g.cases.length > 1 && <span className="psri-badge">{g.cases.length} cases</span>}
+                  {g.latest?.status && <span className="psri-badge">{g.latest.status}</span>}
+                  {g.latest?.priority && <span className="psri-badge">{g.latest.priority}</span>}
                 </div>
               </div>
             </div>
@@ -1107,56 +1153,76 @@ export default function CasesPage() {
         </div>
 
         <div className="psri-detail">
-          {!selected ? (
+          {!selectedGroup ? (
             <div className="psri-detail-empty">
               <div className="psri-detail-empty-icon">🗂️</div>
-              <p>Select a case to view details</p>
+              <p>Select a patient to view their case history</p>
             </div>
           ) : (
             <div className="psri-detail-card">
               <div className="psri-detail-head">
-                <div className="psri-avatar lg">{(selected.contactName || '?').trim().split(/\s+/).slice(0, 2).map(s => s[0]?.toUpperCase()).join('')}</div>
+                <div className="psri-avatar lg">{(selectedGroup.contactName || '?').trim().split(/\s+/).slice(0, 2).map(s => s[0]?.toUpperCase()).join('')}</div>
                 <div>
-                  <div className="psri-detail-name">{selected.contactName}</div>
-                  {selected.status && <span className="psri-badge">{selected.status}</span>}
+                  <div className="psri-detail-name">{selectedGroup.contactName}</div>
+                  <span className="psri-badge">{selectedGroup.cases.length} case{selectedGroup.cases.length !== 1 ? 's' : ''}</span>
                 </div>
-                <button className="psri-btn-ghost" onClick={() => openEdit(selected)}>Edit</button>
+                <button className="psri-btn-primary" onClick={() => openNewForPatient(selectedGroup)}>+ New Case</button>
               </div>
               <div className="psri-detail-grid">
                 <div className="psri-detail-item">
                   <span>Mobile</span>
                   <strong>
-                    {selected.contactMobile || '—'}
-                    {hasWidget && selected.contactMobile && (
+                    {selectedGroup.contactMobile || '—'}
+                    {hasWidget && selectedGroup.contactMobile && (
                       <button
                         className="stg-c2c-btn"
-                        title={`Call ${selected.contactMobile}`}
-                        onClick={() => dial(selected.contactMobile)}
+                        title={`Call ${selectedGroup.contactMobile}`}
+                        onClick={() => dial(selectedGroup.contactMobile)}
                       >&#128222;</button>
                     )}
                   </strong>
                 </div>
-                <div className="psri-detail-item"><span>Channel</span><strong>{selected.channel || '—'}</strong></div>
-                <div className="psri-detail-item"><span>Type of Call</span><strong>{selected.typeOfCall || '—'}</strong></div>
-                <div className="psri-detail-item"><span>Call For</span><strong>{selected.callFor || '—'}</strong></div>
-                <div className="psri-detail-item"><span>Type of Enquiry</span><strong>{selected.typeOfEnquiry || '—'}</strong></div>
-                {selected.typeOfComplaint && <div className="psri-detail-item"><span>Type of Complaint</span><strong>{selected.typeOfComplaint}</strong></div>}
-                {selected.typeOfEmergency && <div className="psri-detail-item"><span>Type of Emergency</span><strong>{selected.typeOfEmergency}</strong></div>}
-                {selected.queryType && <div className="psri-detail-item"><span>Query Type</span><strong>{selected.queryType}</strong></div>}
-                <div className="psri-detail-item"><span>Assigned To</span><strong>{users.find(u => u.id === selected.assignedTo)?.name || '—'}</strong></div>
               </div>
-              {selected.summary && (
-                <div className="psri-detail-notes">
-                  <span>Summary</span>
-                  <p>{selected.summary}</p>
-                </div>
-              )}
-              {selected.isAppreciation && (
-                <div className="psri-detail-notes" style={{ borderLeftColor: '#22c55e' }}>
-                  <span>Appreciation Received</span>
-                  <p>{selected.appreciationDetails || '(no details recorded)'}</p>
-                </div>
-              )}
+
+              <div className="psri-side-card-title" style={{ marginTop: 16 }}>Case History</div>
+              <div className="psri-side-results" style={{ maxHeight: 'calc(100vh - 340px)' }}>
+                {selectedGroup.cases.map(c => {
+                  const isOpen = expandedCaseIds.has(c.id);
+                  return (
+                    <div key={c.id} className="psri-side-history-item">
+                      <div className="psri-side-history-top">
+                        <span className="psri-badge">{c.callFor || c.typeOfCall || '—'}</span>
+                        {c.status && <span className="psri-badge">{c.status}</span>}
+                        <span className="psri-side-history-date">{c.created ? new Date(c.created).toLocaleDateString('en-IN') : ''}</span>
+                        <button type="button" className="psri-expand-btn" onClick={() => toggleCaseExpand(c.id)}>
+                          {isOpen ? '▲' : '▼'}
+                        </button>
+                      </div>
+                      <p className="psri-side-history-summary">{c.summary || '(no summary)'}</p>
+                      {isOpen && (
+                        <div className="psri-history-detail">
+                          {c.channel         && <div className="psri-hd-row"><span>Channel</span><strong>{c.channel}</strong></div>}
+                          {c.typeOfCall      && <div className="psri-hd-row"><span>Type of Call</span><strong>{c.typeOfCall}</strong></div>}
+                          {c.typeOfEnquiry   && <div className="psri-hd-row"><span>Enquiry</span><strong>{c.typeOfEnquiry}</strong></div>}
+                          {c.typeOfComplaint && <div className="psri-hd-row"><span>Complaint</span><strong>{c.typeOfComplaint}</strong></div>}
+                          {c.typeOfEmergency && <div className="psri-hd-row"><span>Emergency</span><strong>{c.typeOfEmergency}</strong></div>}
+                          {c.queryType       && <div className="psri-hd-row"><span>Query Type</span><strong>{c.queryType}</strong></div>}
+                          {c.specialty       && <div className="psri-hd-row"><span>Specialty</span><strong>{c.specialty}</strong></div>}
+                          {c.doctorName      && <div className="psri-hd-row"><span>Doctor</span><strong>{c.doctorName}</strong></div>}
+                          {c.appointmentDate && <div className="psri-hd-row"><span>Appointment</span><strong>{c.appointmentDate}{c.appointmentTime ? ` at ${c.appointmentTime}` : ''}</strong></div>}
+                          {c.appointmentStatus && <div className="psri-hd-row"><span>Appt Status</span><strong>{c.appointmentStatus}</strong></div>}
+                          {c.isCallback      && <div className="psri-hd-row"><span>Callback</span><strong>{c.callbackDatetime || 'Arranged'}</strong></div>}
+                          {c.isTransfer      && <div className="psri-hd-row"><span>Transferred To</span><strong>{c.transferredTo || 'Yes'}</strong></div>}
+                          {c.isHighValue     && <div className="psri-hd-row"><span>High Value</span><strong>Yes</strong></div>}
+                          <div className="psri-hd-row"><span>Assigned To</span><strong>{users.find(u => u.id === c.assignedTo)?.name || '—'}</strong></div>
+                          {c.isAppreciation  && <div className="psri-hd-row"><span>Appreciation</span><strong>{c.appreciationDetails || 'Yes'}</strong></div>}
+                          <button type="button" className="psri-btn-ghost" style={{ marginTop: 8 }} onClick={() => openEdit(c)}>Edit this case</button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           )}
         </div>

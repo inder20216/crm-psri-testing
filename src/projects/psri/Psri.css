@@ -69,6 +69,15 @@
   gap: 12px;
   margin-bottom: 16px;
 }
+/* The dialer panel, doctor lookup, missed-calls bar and chat widget all
+   float via position:fixed and can drift over this row on some viewport
+   sizes, silently swallowing clicks meant for "+ New Case" / "+ New
+   Contact" — pull the button above every one of them (highest floating
+   z-index in this file is 9500) so it always wins the hit test. */
+.psri-search-row .psri-btn-primary {
+  position: relative;
+  z-index: 9999;
+}
 .psri-search-input {
   flex: 1;
   max-width: 420px;
