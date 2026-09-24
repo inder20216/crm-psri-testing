@@ -1,0 +1,23 @@
+{
+  "v": 1,
+  "nodes": [
+    { "id": "t",  "type": "trigger",   "position": { "x": 0, "y": 0 }, "data": { "actionType": "contactCreated", "config": {} } },
+    { "id": "a",  "type": "action",    "position": { "x": 0, "y": 0 }, "data": { "actionType": "assign", "config": { "assignedTo": "USR001" } } },
+    { "id": "u",  "type": "action",    "position": { "x": 0, "y": 0 }, "data": { "actionType": "updateContact", "config": { "field": "notes", "value": "Onboarded for {{contact.name}}" } } },
+    { "id": "c",  "type": "condition", "position": { "x": 0, "y": 0 }, "data": { "actionType": "condition", "config": { "field": "email", "operator": "notEmpty", "value": "" } } },
+    { "id": "e",  "type": "action",    "position": { "x": 0, "y": 0 }, "data": { "actionType": "notify", "config": { "channel": "Email", "from": "", "to": "{{contact.email}}", "subject": "Welcome {{contact.name}}", "body": "Hi {{contact.name}}" } } },
+    { "id": "k",  "type": "action",    "position": { "x": 0, "y": 0 }, "data": { "actionType": "createCase", "config": { "channel": "Web", "typeOfCall": "Enquiry", "status": "Open", "summary": "New contact — {{contact.name}} ({{contact.mobile}})" } } },
+    { "id": "w",  "type": "action",    "position": { "x": 0, "y": 0 }, "data": { "actionType": "webhook", "config": { "url": "https://example.com/hook", "method": "POST", "body": "{ \"text\": \"{{contact.name}}\" }" } } },
+    { "id": "l",  "type": "action",    "position": { "x": 0, "y": 0 }, "data": { "actionType": "sheetRow", "config": { "tab": "New Cases", "rows": [ { "key": "Contact Name", "value": "{{contact.name}}" }, { "key": "Mobile", "value": "{{contact.mobile}}" }, { "key": "Case ID", "value": "{{case.caseId}}" }, { "key": "Colour", "value": "x" } ] } } }
+  ],
+  "edges": [
+    { "id": "1", "source": "t", "target": "a", "sourceHandle": null },
+    { "id": "2", "source": "a", "target": "u", "sourceHandle": null },
+    { "id": "3", "source": "u", "target": "c", "sourceHandle": null },
+    { "id": "4", "source": "c", "target": "e", "sourceHandle": "true" },
+    { "id": "5", "source": "c", "target": "k", "sourceHandle": "false" },
+    { "id": "6", "source": "e", "target": "w", "sourceHandle": null },
+    { "id": "7", "source": "w", "target": "l", "sourceHandle": null },
+    { "id": "8", "source": "k", "target": "l", "sourceHandle": null }
+  ]
+}

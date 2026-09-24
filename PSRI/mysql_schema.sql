@@ -140,3 +140,97 @@ CREATE TABLE cases (
 --     AND TABLE_NAME IN ('contacts','cases')
 --   ORDER BY TABLE_NAME, ORDINAL_POSITION;
 -- ============================================================
+
+-- ════════════════════════════════════════════════════════════════════
+-- WORKFLOW STORE + RUN LOG  — new in the PHP era.
+-- The React Flow designer serializes each saved workflow (its node/edge
+-- graph) to `workflows.graph_json`. The PHP runner reads that JSON,
+-- executes it node-by-node on the next matching trigger, and appends one
+-- row per executed node to `workflow_runs` (what the editor's History tab
+-- lists). Kept deliberately small + late in the file so the 1:1 hand-port
+-- tables above stay the readable core. The runner creates both tables
+-- itself (`php api.php migrate`), so this block is documentation too.
+-- ════════════════════════════════════════════════════════════════════
+CREATE TABLE workflows (
+  workflow_id      VARCHAR(64)  NOT NULL PRIMARY KEY,        -- wf_xxxxxxxx, app-generated
+  name             VARCHAR(200) NOT NULL DEFAULT '',
+  trigger_key      VARCHAR(50)  NOT NULL DEFAULT 'contact-created', -- 'contact-created' | 'case-created'
+  status           VARCHAR(10)  NOT NULL DEFAULT 'Draft',    -- 'Draft' | 'Active' — only Active runs
+  graph_json       LONGTEXT     NOT NULL,                    -- the designer's serialized node/edge graph
+  updated_by       VARCHAR(120) NOT NULL DEFAULT '',
+  created          TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated          TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_wf_trigger_status (trigger_key, status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE workflow_runs (
+  run_id         BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  workflow_id    VARCHAR(64)  NOT NULL DEFAULT '',
+  workflow_name  VARCHAR(200) NOT NULL DEFAULT '',
+  trigger_key    VARCHAR(50)  NOT NULL DEFAULT '',          -- which event fired this run
+  contact_id     VARCHAR(20)  NOT NULL DEFAULT '',
+  contact_name   VARCHAR(255) NOT NULL DEFAULT '',
+  case_id        VARCHAR(20)  NOT NULL DEFAULT '',          -- the triggering case (case-created runs)
+  node_id        VARCHAR(64)  NOT NULL DEFAULT '',
+  action         VARCHAR(60)  NOT NULL DEFAULT '',          -- human label, e.g. 'Assign contact'
+  status         VARCHAR(10)  NOT NULL DEFAULT 'ok',        -- ok | error | noop
+  error          TEXT         NULL,
+  created        TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_runs_workflow   (workflow_id, created),
+  INDEX idx_runs_contact_id (contact_id),
+  INDEX idx_runs_case_id    (case_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ============================================================
+-- Verify the runner-side tables too:
+--   SELECT TABLE_NAME, COLUMN_NAME, COLUMN_TYPE
+--   FROM information_schema.columns
+--   WHERE TABLE_SCHEMA = DATABASE()
+--     AND TABLE_NAME IN ('workflows','workflow_runs','new_contacts','new_cases')
+--   ORDER BY TABLE_NAME, ORDINAL_POSITION;
+-- ============================================================
+
+-- ════════════════════════════════════════════════════════════════
+-- NEW CONTACTS LIST  (replaces the old "New Contacts" Sheets tab —
+-- written by the PHP workflow runner's sheetRow action when its
+-- `tab` = 'New Contacts'.)  Each new/test contact lands here as a row.
+-- ════════════════════════════════════════════════════════════════
+CREATE TABLE new_contacts (
+  log_id        BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  case_id       VARCHAR(20)     NOT NULL DEFAULT '',          -- link to cases.case_id when autocreated
+  contact_id    VARCHAR(20)     NOT NULL DEFAULT '',          -- link back to contacts.contact_id
+  contact_name  VARCHAR(255)    NOT NULL DEFAULT '',
+  mobile        VARCHAR(20)     NOT NULL DEFAULT '',          -- digits only, same convention as contacts
+  source        VARCHAR(100)    NOT NULL DEFAULT '',
+  lead_type     VARCHAR(50)     NOT NULL DEFAULT '',
+  workflow_id   VARCHAR(64)     NOT NULL DEFAULT '',          -- which saved workflow produced this row
+  created       TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,  -- MySQL-managed, don't pass on INSERT
+  CONSTRAINT chk_new_contacts_mobile CHECK (mobile = '' OR mobile REGEXP '^[0-9]+$'),
+  INDEX idx_nc_contact_id (contact_id),
+  INDEX idx_nc_case_id    (case_id),
+  INDEX idx_nc_created    (created)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ════════════════════════════════════════════════════════════════
+-- NEW CASES LIST  (replaces the old "New Cases" Sheets tab — written
+-- by the PHP workflow runner's sheetRow action when its `tab` =
+-- 'New Cases'.)  Each new case lands here as a row, so a freshly
+-- registered case is automatically added to this list AND appended.
+-- ════════════════════════════════════════════════════════════════
+CREATE TABLE new_cases (
+  log_id      BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  case_id     VARCHAR(20)     NOT NULL DEFAULT '',            -- link to cases.case_id
+  contact_id  VARCHAR(20)     NOT NULL DEFAULT '',            -- link back to contacts.contact_id
+  contact_name VARCHAR(255)   NOT NULL DEFAULT '',
+  mobile      VARCHAR(20)     NOT NULL DEFAULT '',            -- digits only
+  specialty   VARCHAR(100)    NOT NULL DEFAULT '',
+  summary     TEXT            NULL,
+  priority    VARCHAR(20)     NOT NULL DEFAULT '',
+  status      VARCHAR(50)     NOT NULL DEFAULT 'Open',
+  workflow_id VARCHAR(64)     NOT NULL DEFAULT '',            -- which saved workflow produced this row
+  created     TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,  -- MySQL-managed, don't pass on INSERT
+  CONSTRAINT chk_new_cases_mobile CHECK (mobile = '' OR mobile REGEXP '^[0-9]+$'),
+  INDEX idx_nc2_case_id    (case_id),
+  INDEX idx_nc2_contact_id (contact_id),
+  INDEX idx_nc2_created    (created)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

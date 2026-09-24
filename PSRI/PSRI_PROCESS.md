@@ -31,6 +31,19 @@ Plus platform-level admin:
 | Picklists | `/admin/picklists` | Super Admin only | Flat admin-managed dropdown values |
 | Dependencies | `/admin/dependencies` | Super Admin only | Value-to-value relationships between picklists |
 | Productivity | `/admin/productivity` | Admin **or** Super Admin (TL/Manager) | Per-agent call volume, AHT, missed-call callback TAT — see Telephony section |
+| Workflows | `/admin/workflows` | Super Admin only | Visual "new contact" automation — see Workflow Automation section |
+
+## Workflow Automation (visual designer + PHP runner)
+
+React Flow designer (`src/admin/workflow/` + `WorkflowEditorPage.jsx` / `WorkflowsPage.jsx`, logged into the palette at `/admin/workflows`) lets a Super Admin design what happens when a new contact is created. The graph is validated and serialized to a compact JSON config, saved to MySQL `workflows`, and **executed by the PHP runner** (`PSRI/Workflows/php/`, replaced n8n in Sep 2026) — the editor never names the backend.
+
+- **Config storage**: MySQL `workflows` (`workflow_id, name, trigger_key, status Draft|Active, graph_json, updated_by, updated`). Only `Active` rows run. Frontend endpoints `psri-workflow-get` / `-save` / `-runs` go to `VITE_PSRI_WORKFLOW_BASE` (default `/psri-api`), not the n8n base.
+- **Runner** (`runner.php`, entry `api.php`): `POST psri-contact-workflow-run {contact}` and `POST psri-case-workflow-run {case}`. BFS-walks the graph from the trigger (conditions follow only their True/False edges; a merge node runs once; conditions see earlier Update Contact writes), resolves `{{contact.x}}` / `{{case.x}}`, executes assign / create-case / update-contact / list-row / webhook / email, and logs each node to `workflow_runs`. Each workflow runs at most once per contact (contact-created) or case (case-created). `POST psri-workflow-test {graph, contact?, case?}` is a dry run (writes nothing).
+- **Append Row to Sheet** now writes to MySQL: tab `New Contacts` → `new_contacts`, `New Cases` → `new_cases`; row labels are matched to columns (Contact Name/Full Name, Mobile, Source, Lead Type, Case ID, Specialty, Summary, Priority, Status); `contact_id`, `case_id`, `workflow_id` fill automatically.
+- **Palette (v1)**: Trigger `Contact Created`; Actions `Assign Contact`, `Send Notification`, `Create Case`, `Update Contact`, `Append Row to Sheet`, `Call Webhook`; Logic `Condition`. Contact payload = the camelCase contact object submitted to `psri-contact-add`; actions needing the DB id require `contact.id`.
+- **Node types** (`actionType`): `contactCreated`, `assign`, `notify`, `createCase`, `updateContact`, `sheetRow`, `webhook`, `condition`. Conditions evaluate on contact fields with operators `eq/neq/contains/notContains/in/empty/notEmpty`; edges carry `sourceHandle: 'true'|'false'`.
+- **Hooks**: fired fire-and-forget by the frontend — `psri.addContact` after a successful add; `CasesPage.handleSave` via `psri.runCaseWorkflows` for a new case or a completed Incomplete draft (never for drafts or ordinary edits).
+- Email notifications use PHP `mail()`, so the PHP host needs a working mail transport (sendmail/SMTP relay).
 
 ## Data Model
 
@@ -111,6 +124,8 @@ Agent-facing AI chat (💬 icon) answering billing/tariff questions from source 
 - **VMM's SparkTG webhook** — configuration email sent to SparkTG support, awaiting their reply.
 - **Leads module** — explicitly deferred until Cases is solid; not yet scoped.
 - **Google Maps city autocomplete** — "nice to have," needs a billing-enabled API key that doesn't exist yet.
+- **Deploy the workflow PHP API** to a PHP 8 host that can reach the MySQL server, run `php api.php migrate` there, and build the frontend with `VITE_PSRI_WORKFLOW_BASE` pointing at it (see `PSRI/Workflows/IMPORT_NOTES.md`).
+- **Built-in templates reference non-contact fields** — New Contact template's Update Contact sets `leadType`, New Case template's sets `specialty`; neither is a `contacts` column, so those nodes log an error until changed.
 
 ## Key Files
 - `universal-crm/` — React app source (shell: `src/App.jsx`, `src/components/ProjectRail.jsx`; PSRI pages: `src/projects/psri/`; admin pages: `src/admin/`; shared contexts: `src/context/`; API layer: `src/api/psri.js`)

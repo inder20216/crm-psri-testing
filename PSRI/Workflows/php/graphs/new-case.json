@@ -1,0 +1,15 @@
+{
+  "v": 1,
+  "nodes": [
+    { "id": "t", "type": "trigger",   "position": { "x": 0, "y": 0 }, "data": { "actionType": "caseCreated", "config": {} } },
+    { "id": "c", "type": "condition", "position": { "x": 0, "y": 0 }, "data": { "actionType": "condition", "config": { "field": "specialty", "operator": "in", "value": "Cardiology, Neurology" } } },
+    { "id": "d", "type": "action",    "position": { "x": 0, "y": 0 }, "data": { "actionType": "notify", "config": { "channel": "Webhook", "url": "https://example.com/doctor", "message": "Appointment: {{contact.name}} → Dr. {{case.doctorName}}" } } },
+    { "id": "l", "type": "action",    "position": { "x": 0, "y": 0 }, "data": { "actionType": "sheetRow", "config": { "tab": "new cases", "rows": [ { "key": "Case ID", "value": "{{case.caseId}}" }, { "key": "Contact", "value": "{{contact.name}}" }, { "key": "Summary", "value": "{{case.summary}}" }, { "key": "Specialty", "value": "{{case.specialty}}" } ] } } }
+  ],
+  "edges": [
+    { "id": "1", "source": "t", "target": "c", "sourceHandle": null },
+    { "id": "2", "source": "c", "target": "d", "sourceHandle": "true" },
+    { "id": "3", "source": "c", "target": "l", "sourceHandle": "false" },
+    { "id": "4", "source": "d", "target": "l", "sourceHandle": null }
+  ]
+}

@@ -19,18 +19,57 @@ function highlightMentions(text) {
 }
 
 function formatBotText(text) {
-  const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
-  const hasBullets = lines.some(l => l.startsWith('- '));
+  const rawLines = text.split('\n').map(l => l.replace(/\s+$/, '')).filter(l => l.trim() !== '');
+  const hasBullets = rawLines.some(l => /^\s*-\s+/.test(l));
 
   if (hasBullets) {
-    const heading = lines.filter(l => !l.startsWith('- '));
-    const bullets = lines.filter(l => l.startsWith('- ')).map(l => l.slice(2));
+    // Walk lines in original order instead of bucketing "all headings" then
+    // "all bullets" separately — that used to detach a heading from the
+    // list it introduced (e.g. "Additional charges:" ending up nowhere near
+    // its own bullets) and flatten indented sub-bullets in with top-level
+    // ones (e.g. per-room-type prices rendering as siblings of the bullet
+    // that names the room types, instead of nested under it), turning a
+    // correct multi-section answer into a scrambled single list.
+    const blocks = [];
+    let currentList = null;
+    rawLines.forEach(raw => {
+      const bulletMatch = raw.match(/^(\s*)-\s+(.*)$/);
+      if (!bulletMatch) {
+        currentList = null;
+        blocks.push({ type: 'text', text: raw.trim() });
+        return;
+      }
+      const indented = bulletMatch[1].length > 0;
+      const content = bulletMatch[2].trim();
+      if (!currentList) {
+        currentList = { type: 'list', items: [] };
+        blocks.push(currentList);
+      }
+      if (indented && currentList.items.length > 0) {
+        currentList.items[currentList.items.length - 1].children.push(content);
+      } else {
+        currentList.items.push({ text: content, children: [] });
+      }
+    });
+
     return (
       <>
-        {heading.map((h, i) => <span key={i} style={{ display: 'block', marginBottom: 4 }}>{h}</span>)}
-        <ul style={{ margin: '4px 0 0', paddingLeft: 16 }}>
-          {bullets.map((b, i) => <li key={i} style={{ marginBottom: 3 }}>{b}</li>)}
-        </ul>
+        {blocks.map((b, i) => b.type === 'text' ? (
+          <span key={i} style={{ display: 'block', marginBottom: 4 }}>{b.text}</span>
+        ) : (
+          <ul key={i} style={{ margin: '4px 0 8px', paddingLeft: 16 }}>
+            {b.items.map((it, j) => (
+              <li key={j} style={{ marginBottom: 3 }}>
+                {it.text}
+                {it.children.length > 0 && (
+                  <ul style={{ margin: '2px 0 0', paddingLeft: 16 }}>
+                    {it.children.map((c, k) => <li key={k} style={{ marginBottom: 2 }}>{c}</li>)}
+                  </ul>
+                )}
+              </li>
+            ))}
+          </ul>
+        ))}
       </>
     );
   }
@@ -80,11 +119,23 @@ export default function ChatWidget() {
     setInput('');
     setBotThinking(true);
     try {
-      const res = await fetch(TARIFF_ENDPOINT, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: text, agentId: currentUser?.id || '' }),
-      });
+      // The bot's own answers have taken up to ~13s in practice (LLM-backed
+      // workflow) — without a cap, a genuinely stuck request just leaves
+      // the "thinking" dots running forever with no feedback at all.
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 30000);
+      let res;
+      try {
+        res = await fetch(TARIFF_ENDPOINT, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: text, agentId: currentUser?.id || '' }),
+          signal: controller.signal,
+        });
+      } finally {
+        clearTimeout(timeout);
+      }
+      if (!res.ok) throw new Error(`request failed: ${res.status}`);
       const data = await res.json();
       const botMsg = {
         id: Date.now() + 1,

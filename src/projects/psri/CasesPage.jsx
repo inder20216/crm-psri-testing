@@ -640,9 +640,13 @@ export default function CasesPage() {
         await psri.updateCase(payload);
         showToast('Case updated');
       } else {
-        await psri.addCase(payload);
+        const res = await psri.addCase(payload);
+        payload.id = res?.id;
         showToast('Case created');
       }
+      // A brand-new case, or an Incomplete draft being completed, counts as
+      // "case created" for automations — ordinary edits don't.
+      if (!form.id || form.status === 'Incomplete') psri.runCaseWorkflows(payload);
       await refresh();
       setSaved(true);
       checkCase();
