@@ -12,6 +12,8 @@ import UsersPage from './admin/UsersPage';
 import PicklistsPage from './admin/PicklistsPage';
 import DependenciesPage from './admin/DependenciesPage';
 import ProductivityPage from './admin/ProductivityPage';
+import WorkflowsPage from './admin/WorkflowsPage';
+import WorkflowEditorPage from './admin/WorkflowEditorPage';
 import SparkTGWidget from './projects/psri/SparkTGWidget';
 import DialerPanel from './projects/psri/DialerPanel';
 import ChatWidget from './projects/psri/ChatWidget';
@@ -129,6 +131,8 @@ function AppShell() {
                         <Route path="/admin/users"        element={<main className="ucrm-main"><UsersPage /></main>} />
                         <Route path="/admin/picklists"    element={<main className="ucrm-main"><PicklistsPage /></main>} />
                         <Route path="/admin/dependencies" element={<main className="ucrm-main"><DependenciesPage /></main>} />
+                        <Route path="/admin/workflows"      element={<main className="ucrm-main"><WorkflowsPage /></main>} />
+                        <Route path="/admin/workflows/:id"  element={<main className="ucrm-main"><WorkflowEditorPage /></main>} />
                       </>
                     )}
                     {isAdmin && (

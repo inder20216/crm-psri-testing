@@ -90,6 +90,9 @@ export default function ProjectRail() {
                 <Link to="/admin/dependencies" className={`rail-subitem ${pathname === '/admin/dependencies' ? 'active' : ''}`}>
                   <span className="rail-subicon">🔗</span><span>Dependencies</span>
                 </Link>
+                <Link to="/admin/workflows" className={`rail-subitem ${pathname === '/admin/workflows' ? 'active' : ''}`}>
+                  <span className="rail-subicon">🔀</span><span>Workflows</span>
+                </Link>
               </div>
             )}
           </div>

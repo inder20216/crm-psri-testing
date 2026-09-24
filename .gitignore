@@ -6,7 +6,11 @@ dist-ssr
 *.sw?
 
 # PSRI — workflows contain API credentials, never commit
-PSRI/Workflows/
+PSRI/Workflows/*
+# ...except the PHP workflow API code + its setup notes (credentials stay local in config.php)
+!PSRI/Workflows/php/
+!PSRI/Workflows/IMPORT_NOTES.md
+PSRI/Workflows/php/config.php
 # Large binary/reference files
 PSRI/*.pdf
 PSRI/*.xlsx
