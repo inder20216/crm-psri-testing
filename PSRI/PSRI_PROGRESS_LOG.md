@@ -6,6 +6,28 @@ To add today's entry: copy the template at the very bottom of this file, fill it
 
 ---
 
+## 2026-09-25 — Workflow automation (new contact / new case)
+
+**Shipped:**
+- Visual Workflows designer for Super Admins — automations are drawn on a canvas and switched Draft/Active; two are live: "New Contact Onboarding" and "New Case Onboarding"
+- New contact automation: auto-assigns the contact, sends a welcome email when they have an address, otherwise opens an enquiry case, and adds them to the New Contacts list
+- New case automation: auto-assigns, sends the patient an appointment confirmation or enquiry acknowledgement, and adds the case to the New Cases list
+- Every automation step is recorded and visible in each workflow's History tab; a workflow never runs twice for the same contact or case
+- Automations moved off the old automation platform onto the CRM's own backend and database — verified end to end with a real case saved from the app
+- Fixed the workflow screen's Active/Save buttons being hidden under the floating call/chat widgets
+
+**In Progress:**
+- Moving the automation service onto the company web server so it runs for every user (currently runs from one development PC)
+
+**Blocked:**
+- Server access for that move — waiting on SSH access to the web/database server
+
+**Next:**
+- Install the automation service on the server, switch on outgoing email, and publish the updated app
+- Confirm welcome / confirmation emails arrive (and not in spam)
+
+---
+
 ## 2026-09-01 — Telephony integration + CRM feature build-out (consolidated recap)
 
 *This entry retroactively summarizes a recent multi-day push, since day-by-day entries weren't kept during it. Entries from here forward should be added per actual day.*

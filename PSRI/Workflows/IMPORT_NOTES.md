@@ -37,6 +37,17 @@ PHP on this machine is the winget install (not on PATH):
 
 ## Deploy
 
+**Target:** the Ubuntu/Apache server at 45.114.142.171 (also the MySQL host), which already serves
+`https://openmindservices.in` with a valid certificate → API URL `https://openmindservices.in/psri-workflow/api.php`.
+
+**Scripted (recommended):** copy the `php/` folder to the server and run `sudo bash php/deploy/server-setup.sh`
+(optionally `TEST_EMAIL=you@example.com`). It installs PHP + postfix, puts the code in `/opt/psri-workflow`
+(config.php there, `root:www-data 640`, never in the web root), adds a one-line stub at
+`<docroot>/psri-workflow/api.php`, runs `migrate`, and smoke-tests the URL + CORS header. Safe to re-run.
+Deploy key for this PC: `~/.ssh/psri_deploy` (public half must be in the server user's `authorized_keys`).
+
+**Manual steps (what the script does):**
+
 1. Copy `php/` to any PHP 8.1+ host with `pdo_mysql` that can reach MySQL `45.114.142.171:3306`
    (`curl` and `mbstring` are used when present, not required). Keep `config.php` out of the web root
    or protect it; better, set the `PSRI_DB_*` env vars and blank the defaults.
