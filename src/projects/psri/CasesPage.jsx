@@ -11,6 +11,12 @@ import ContactPicker from './ContactPicker';
 import { DoctorSpecialtyPanel } from './DoctorLookupWidget';
 import './Psri.css';
 
+// Query Type defaults to Basic for every call, but these Call For types
+// tend to need more than a basic note — nudge the agent to reconsider
+// rather than force it, since Basic can still be genuinely right.
+// Appointment is deliberately excluded — a booking rarely needs the nudge.
+const QUERY_TYPE_NUDGE_CALL_FORS = ['Enquiry or Transfer', 'Complaint/Feedback', 'Emergency'];
+
 // Value-to-value dependency lookup (e.g. Specialty=Cardiology → Doctor options), with a
 // fallback to the flat base picklist if no dependency pairs exist yet for that value.
 function getDependentOptions(getDependentValues, getList, subField, mainField, mainValue) {
@@ -1051,6 +1057,11 @@ export default function CasesPage() {
                 <option value="Basic">Basic</option>
                 <option value="Detailed">Detailed</option>
               </select>
+              {form.queryType === 'Basic' && QUERY_TYPE_NUDGE_CALL_FORS.includes(form.callFor) && (
+                <p style={{ color: '#b45309', fontSize: 12, fontWeight: 600, margin: '6px 0 0' }}>
+                  {form.callFor} calls often need more than a basic note — consider changing this to Detailed if this one does.
+                </p>
+              )}
             </div>
           </div>
 
