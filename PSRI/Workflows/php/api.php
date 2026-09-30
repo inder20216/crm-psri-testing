@@ -5,6 +5,16 @@
  * works both as  .../api.php/psri-workflow-get  (Apache/nginx PATH_INFO)
  * and behind  php -S localhost:8000 api.php  (router mode, local dev).
  *
+ *   GET  psri-contacts?q=                      → { success, contacts:[…] } (list/search; q empty = 50 most recent)
+ *   POST psri-contact-add    {name,mobile,contactType,…}  → { success, id, message } (400 + error on invalid/duplicate)
+ *   POST psri-contact-update {id,…}                       → { success, id, message } (400 + error on invalid/not found)
+ *   GET  psri-cases?q=|status=|callTxnIds=                → { success, cases:[…], count } (priority: callTxnIds > status > q > 50 most recent)
+ *   GET  psri-contacts-export?from=&to=  → CSV download, every column, all rows (from/to = Y-m-d, optional)
+ *   GET  psri-cases-export?from=&to=     → CSV download, every column, all rows (from/to = Y-m-d, optional)
+ *   GET  psri-high-value-export?from=&to= → CSV download, cases WHERE is_high_value=1 only
+ *   GET  psri-appreciation-list?status=   → { success, cases:[…] } (status: pending|approved|rejected, blank=all) — includes recordingUrl
+ *   POST psri-appreciation-review {caseId,approved,reviewedBy} → { success, id, message } (400 + error on invalid)
+ *
  *   GET  psri-workflow-get                    → { success, workflows:[…] }
  *   POST psri-workflow-save        {id?,name,trigger,status,config,updatedBy}
  *                                             → { success, workflow:{id,name,status} }
@@ -23,6 +33,9 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/runner.php';
+require_once __DIR__ . '/contacts.php';
+require_once __DIR__ . '/cases.php';
+require_once __DIR__ . '/reports.php';
 
 if (PHP_SAPI === 'cli') {
     $cmd = $argv[1] ?? '';
@@ -85,6 +98,53 @@ if (!is_array($body)) $body = [];
 
 try {
     switch ($route) {
+        case 'psri-contacts':
+            api_out(['success' => true, 'contacts' => contacts_list((string) ($_GET['q'] ?? ''))]);
+
+        case 'psri-contact-add':
+            $res = contacts_add($body);
+            if (isset($res['error'])) api_out(['success' => false, 'error' => $res['error']], 400);
+            api_out(['success' => true] + $res);
+
+        case 'psri-contact-update':
+            $res = contacts_update($body);
+            if (isset($res['error'])) api_out(['success' => false, 'error' => $res['error']], 400);
+            api_out(['success' => true] + $res);
+
+        case 'psri-cases':
+            $cases = cases_list($_GET);
+            api_out(['success' => true, 'cases' => $cases, 'count' => count($cases)]);
+
+        case 'psri-case-add':
+            $res = cases_add($body);
+            if (isset($res['error'])) api_out(['success' => false, 'error' => $res['error']], 400);
+            api_out(['success' => true] + $res);
+
+        case 'psri-case-update':
+            $res = cases_update($body);
+            if (isset($res['error'])) api_out(['success' => false, 'error' => $res['error']], 400);
+            api_out(['success' => true] + $res);
+
+        case 'psri-contacts-export':
+            report_export_csv('contacts', (string) ($_GET['from'] ?? ''), (string) ($_GET['to'] ?? ''));
+            exit(0);
+
+        case 'psri-cases-export':
+            report_export_csv('cases', (string) ($_GET['from'] ?? ''), (string) ($_GET['to'] ?? ''));
+            exit(0);
+
+        case 'psri-high-value-export':
+            report_export_csv('cases', (string) ($_GET['from'] ?? ''), (string) ($_GET['to'] ?? ''), 'is_high_value = 1', 'high_value_cases');
+            exit(0);
+
+        case 'psri-appreciation-list':
+            api_out(['success' => true, 'cases' => cases_appreciation_list((string) ($_GET['status'] ?? ''))]);
+
+        case 'psri-appreciation-review':
+            $res = cases_appreciation_review($body);
+            if (isset($res['error'])) api_out(['success' => false, 'error' => $res['error']], 400);
+            api_out(['success' => true] + $res);
+
         case 'psri-workflow-get':
             api_out(['success' => true, 'workflows' => wf_list()]);
 

@@ -96,7 +96,7 @@ export default function CallLogsPage() {
   const { users } = useUsers();
   const { currentUser, isAdmin } = useAuth();
   const [query, setQuery] = useState('');
-  const [rangeType, setRangeType] = useState('all');
+  const [rangeType, setRangeType] = useState('today');
   const [customFrom, setCustomFrom] = useState(toInputDate(new Date()));
   const [customTo, setCustomTo] = useState(toInputDate(new Date()));
   const [scope, setScope] = useState('all'); // 'mine' | 'all' — only agents with admin rights can switch this; non-admins are always 'mine'

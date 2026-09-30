@@ -8,6 +8,7 @@ export default function DialerPanel() {
   const navigate = useNavigate();
 
   const [contact,     setContact]     = useState(null);
+  const [matches,     setMatches]     = useState([]);   // >1 contacts sharing this number — agent must pick
   const [recentCases, setRecentCases] = useState([]);
   const [searching,   setSearching]   = useState(false);
   const [noContact,   setNoContact]   = useState(false);
@@ -17,76 +18,85 @@ export default function DialerPanel() {
   const autoNavigated  = useRef(false);
   useEffect(() => { callStateRef.current = callState; }, [callState]);
 
+  const goToCasesForNotFound = () => {
+    if (autoNavigated.current) return;
+    autoNavigated.current = true;
+    const cs = callStateRef.current;
+    goToCases({
+      contact:          null,
+      prefillMobile:    phone,
+      autoOpenQuickAdd: true,
+      channel:          'Call',
+      typeOfCall:       cs?.direction === 'inbound' ? 'Inbound' : 'Outbound',
+      callTxnId:        cs?.callId   || '',
+      calledNumber:     cs?.phone    || phone || '',
+    });
+    dismissCall();
+  };
+
+  // Fetches recent cases and auto-navigates for a single confirmed contact —
+  // used both when the search returns exactly one match, and when the agent
+  // picks one out of several matches sharing this number.
+  const proceedWithContact = (found, { cancelledRef } = {}) => {
+    setContact(found);
+    setMatches([]);
+    return psri.getCases(found.mobile).then(cr => {
+      if (cancelledRef?.current) return;
+      setRecentCases((cr.cases || []).slice(0, 3));
+      if (!autoNavigated.current) {
+        autoNavigated.current = true;
+        const cs = callStateRef.current;
+        goToCases({
+          contact:      { id: found.id, name: found.name, mobile: found.mobile, mobileIsd: found.mobileIsd || '+91', salutation: found.salutation },
+          channel:      'Call',
+          typeOfCall:   cs?.direction === 'inbound' ? 'Inbound' : 'Outbound',
+          callTxnId:    cs?.callId    || '',
+          calledNumber: cs?.phone     || phone || '',
+        });
+        dismissCall();
+      }
+    });
+  };
+
+  const pickMatch = (found) => {
+    autoNavigated.current = false; // this is the agent's own click, not the initial auto-search
+    proceedWithContact(found);
+  };
+
   useEffect(() => {
     if (!phone) {
-      setContact(null); setRecentCases([]); setNoContact(false);
+      setContact(null); setMatches([]); setRecentCases([]); setNoContact(false);
       autoNavigated.current = false;
       return;
     }
-    let cancelled = false;
+    const cancelledRef = { current: false };
     autoNavigated.current = false;
     setSearching(true);
-    setContact(null); setRecentCases([]); setNoContact(false);
+    setContact(null); setMatches([]); setRecentCases([]); setNoContact(false);
 
     psri.getContacts(phone)
       .then(res => {
-        if (cancelled) return;
+        if (cancelledRef.current) return;
         const list = res.contacts || [];
-        if (list.length > 0) {
-          const found = list[0];
-          setContact(found);
-          return psri.getCases(found.mobile).then(cr => {
-            if (cancelled) return;
-            setRecentCases((cr.cases || []).slice(0, 3));
-            if (!autoNavigated.current) {
-              autoNavigated.current = true;
-              const cs = callStateRef.current;
-              goToCases({
-                contact:      { id: found.id, name: found.name, mobile: found.mobile, mobileIsd: found.mobileIsd || '+91', salutation: found.salutation },
-                channel:      'Call',
-                typeOfCall:   cs?.direction === 'inbound' ? 'Inbound' : 'Outbound',
-                callTxnId:    cs?.callId    || '',
-                calledNumber: cs?.calledTo  || '',
-              });
-              dismissCall();
-            }
-          });
+        if (list.length === 1) {
+          return proceedWithContact(list[0], { cancelledRef });
+        } else if (list.length > 1) {
+          // Same number shared by several contacts (e.g. a family landline) —
+          // don't guess which one; let the agent choose instead of the old
+          // behaviour of silently taking the first result.
+          setMatches(list);
+          setNoContact(false);
         } else {
-          if (!autoNavigated.current) {
-            autoNavigated.current = true;
-            const cs = callStateRef.current;
-            goToCases({
-              contact:          null,
-              prefillMobile:    phone,
-              autoOpenQuickAdd: true,
-              channel:          'Call',
-              typeOfCall:       cs?.direction === 'inbound' ? 'Inbound' : 'Outbound',
-              callTxnId:        cs?.callId   || '',
-              calledNumber:     cs?.calledTo || '',
-            });
-            dismissCall();
-          }
+          setNoContact(true);
+          goToCasesForNotFound();
         }
       })
       .catch(() => {
-        if (!cancelled && !autoNavigated.current) {
-          autoNavigated.current = true;
-          const cs = callStateRef.current;
-          goToCases({
-            contact:          null,
-            prefillMobile:    phone,
-            autoOpenQuickAdd: true,
-            channel:          'Call',
-            typeOfCall:       cs?.direction === 'inbound' ? 'Inbound' : 'Outbound',
-            callTxnId:        cs?.callId   || '',
-            calledNumber:     cs?.calledTo || '',
-          });
-          dismissCall();
-        }
+        if (!cancelledRef.current) goToCasesForNotFound();
       })
-      .finally(() => { if (!cancelled) setSearching(false); });
+      .finally(() => { if (!cancelledRef.current) setSearching(false); });
 
-    return () => { cancelled = true; };
+    return () => { cancelledRef.current = true; };
   }, [phone]);  // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!hasWidget || !callState) return null;
@@ -97,7 +107,7 @@ export default function DialerPanel() {
     channel:      'Call',
     typeOfCall:   callState.direction === 'inbound' ? 'Inbound' : 'Outbound',
     callTxnId:    callState.callId || '',
-    calledNumber: callState.calledTo || '',
+    calledNumber: callState.phone || phone || '',
     repeatFrom:   repeatFrom || undefined,
   });
 
@@ -157,6 +167,28 @@ export default function DialerPanel() {
               ))}
             </div>
           )}
+        </div>
+      )}
+
+      {!searching && matches.length > 1 && (
+        <div className="stg-no-contact">
+          <p className="stg-hint">{matches.length} contacts share this number — which one is this?</p>
+          {matches.map(m => (
+            <div key={m.id} className="stg-contact-row" style={{ cursor: 'pointer', padding: '6px 0' }} onClick={() => pickMatch(m)}>
+              <div className="stg-contact-avatar">
+                {(m.name || '?').trim().split(/\s+/).slice(0, 2).map(s => s[0]?.toUpperCase()).join('')}
+              </div>
+              <div>
+                <div className="stg-contact-name">{m.salutation} {m.name}</div>
+                <div className="stg-contact-mobile">
+                  {m.mobile === phone ? m.mobile : m.altMobile === phone ? `${m.altMobile} (alt)` : m.landline === phone ? `${m.landline} (landline)` : m.mobile}
+                </div>
+              </div>
+            </div>
+          ))}
+          <div className="stg-dialer-actions">
+            <button className="stg-btn-ghost" onClick={goToCasesForNotFound}>None of these — Add New Contact</button>
+          </div>
         </div>
       )}
 

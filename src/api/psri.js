@@ -39,21 +39,21 @@ export const psri = {
   addUser:    (data)  => post('psri-user-add', data),
   updateUser: (data)  => post('psri-user-update', data),
 
-  getContacts:   (q)    => get('psri-contacts', { q }),
-  addContact:    (data) => post('psri-contact-add', data).then(res => {
+  getContacts:   (q)    => get('psri-contacts', { q }, WF_BASE),
+  addContact:    (data) => post('psri-contact-add', data, WF_BASE).then(res => {
     if (res && res.id) fireWorkflows('psri-contact-workflow-run', { contact: { ...data, id: res.id } });
     return res;
   }),
-  updateContact: (data) => post('psri-contact-update', data),
+  updateContact: (data) => post('psri-contact-update', data, WF_BASE),
 
   getPicklists:     ()    => get('psri-picklists'),
   addPicklistValue: (data) => post('psri-picklist-add', data),
 
   // Accepts either a bare search string or an options object ({ q, status })
   // — status is an exact-match filter (e.g. 'Incomplete'), q is a fuzzy search.
-  getCases:   (opts) => get('psri-cases', typeof opts === 'string' ? { q: opts } : (opts || {})),
-  addCase:    (data) => post('psri-case-add', data),
-  updateCase: (data) => post('psri-case-update', data),
+  getCases:   (opts) => get('psri-cases', typeof opts === 'string' ? { q: opts } : (opts || {}), WF_BASE),
+  addCase:    (data) => post('psri-case-add', data, WF_BASE),
+  updateCase: (data) => post('psri-case-update', data, WF_BASE),
   // "Case Created" automations — call once a case is really saved (not for
   // Incomplete drafts). The runner ignores repeat calls for the same case.
   runCaseWorkflows: (data) => (data && data.id ? fireWorkflows('psri-case-workflow-run', { case: data }) : Promise.resolve()),
@@ -114,4 +114,33 @@ export const psri = {
   getWorkflowRuns:  (opts) => get('psri-workflow-runs', typeof opts === 'string' ? { id: opts } : (opts || {}), WF_BASE)
     .then(d => (d && d.runs ? d.runs : []))
     .catch(err => { console.warn('[workflows] getWorkflowRuns failed:', err.message); return []; }),
+
+  // Raw CSV export (every column, all rows) — a plain download URL, not a
+  // fetch call: the browser handles the download natively and PHP streams
+  // the file, so this stays fine even for contacts' ~150k rows.
+  exportContactsUrl: (from, to) => {
+    const u = new URL(`${WF_BASE}/psri-contacts-export`, window.location.origin);
+    if (from) u.searchParams.set('from', from);
+    if (to)   u.searchParams.set('to', to);
+    return u.toString();
+  },
+  exportCasesUrl: (from, to) => {
+    const u = new URL(`${WF_BASE}/psri-cases-export`, window.location.origin);
+    if (from) u.searchParams.set('from', from);
+    if (to)   u.searchParams.set('to', to);
+    return u.toString();
+  },
+  exportHighValueUrl: (from, to) => {
+    const u = new URL(`${WF_BASE}/psri-high-value-export`, window.location.origin);
+    if (from) u.searchParams.set('from', from);
+    if (to)   u.searchParams.set('to', to);
+    return u.toString();
+  },
+
+  // Appreciation review — TL audits the call recording against the
+  // "Appreciation Received" case and approves/rejects it.
+  getAppreciationList: (status) => get('psri-appreciation-list', { status: status || '' }, WF_BASE)
+    .then(d => (d && d.success ? d.cases : []))
+    .catch(err => { console.warn('[appreciation] getAppreciationList failed:', err.message); return []; }),
+  reviewAppreciation: (data) => post('psri-appreciation-review', data, WF_BASE),
 };

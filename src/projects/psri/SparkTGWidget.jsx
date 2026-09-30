@@ -4,7 +4,7 @@ import { useSparkTG } from '../../context/SparkTGContext';
 const WIDGET_URL = import.meta.env.VITE_SPARKTG_WIDGET_URL || '';
 
 export default function SparkTGWidget() {
-  const { iframeRef, widgetVisible, setWidgetVisible, ready, ssoStatus, rawEvents, clearRawEvents } = useSparkTG();
+  const { iframeRef, widgetVisible, setWidgetVisible, ready, ssoStatus, rawEvents, clearRawEvents, backendCallLog, fetchBackendCallLog } = useSparkTG();
   const [debugOpen, setDebugOpen] = useState(false);
 
   if (!WIDGET_URL) return null;
@@ -41,12 +41,27 @@ export default function SparkTGWidget() {
           <div className="stg-debug-header">
             <span>SparkTG Raw Events</span>
             <div style={{ display: 'flex', gap: 8 }}>
+              <button onClick={fetchBackendCallLog} style={{ fontSize: 11, cursor: 'pointer', background: 'none', border: '1px solid #4a9', color: '#4a9', borderRadius: 4, padding: '2px 8px' }}>Fetch call_logs</button>
               <button onClick={clearRawEvents} style={{ fontSize: 11, cursor: 'pointer', background: 'none', border: '1px solid #444', color: '#ccc', borderRadius: 4, padding: '2px 8px' }}>Clear</button>
               <button onClick={() => setDebugOpen(false)} style={{ fontSize: 13, cursor: 'pointer', background: 'none', border: 'none', color: '#ccc' }}>✕</button>
             </div>
           </div>
           {rawEvents.length === 0 && (
             <div className="stg-debug-empty">No events yet. Make or receive a call to see what SparkTG sends.</div>
+          )}
+          {backendCallLog && (
+            <div className="stg-debug-event">
+              <div className="stg-debug-event-header">
+                <span className="stg-debug-event-name">
+                  Backend call_logs row (callTxnId: {backendCallLog.callTxnId})
+                  {backendCallLog.status === 'polling' && ' — fetching…'}
+                  {backendCallLog.status === 'timeout' && ' — no row found yet, try Fetch again in a few seconds'}
+                </span>
+              </div>
+              {backendCallLog.record && (
+                <pre className="stg-debug-event-data">{JSON.stringify(backendCallLog.record, null, 2)}</pre>
+              )}
+            </div>
           )}
           {rawEvents.map((e, i) => (
             <div key={i} className="stg-debug-event">

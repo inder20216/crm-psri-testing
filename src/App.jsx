@@ -12,6 +12,8 @@ import UsersPage from './admin/UsersPage';
 import PicklistsPage from './admin/PicklistsPage';
 import DependenciesPage from './admin/DependenciesPage';
 import ProductivityPage from './admin/ProductivityPage';
+import ReportsPage from './admin/ReportsPage';
+import AppreciationPage from './admin/AppreciationPage';
 import WorkflowsPage from './admin/WorkflowsPage';
 import WorkflowEditorPage from './admin/WorkflowEditorPage';
 import SparkTGWidget from './projects/psri/SparkTGWidget';
@@ -136,7 +138,11 @@ function AppShell() {
                       </>
                     )}
                     {isAdmin && (
-                      <Route path="/admin/productivity" element={<main className="ucrm-main"><ProductivityPage /></main>} />
+                      <>
+                        <Route path="/admin/productivity" element={<main className="ucrm-main"><ProductivityPage /></main>} />
+                        <Route path="/admin/reports"       element={<main className="ucrm-main"><ReportsPage /></main>} />
+                        <Route path="/admin/appreciation"  element={<main className="ucrm-main"><AppreciationPage /></main>} />
+                      </>
                     )}
                     <Route path="/admin/*" element={<Navigate to="/psri/contacts" replace />} />
                     <Route path="/" element={<Navigate to="/psri/contacts" replace />} />
