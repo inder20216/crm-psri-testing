@@ -132,6 +132,15 @@ CREATE TABLE cases (
   INDEX idx_cases_call_txn_id    (call_txn_id)   -- matches call_logs.call_txn_id by value (no FK — see note above)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- ── APPRECIATION REVIEW (added post-creation, 2026-09-30) ──────
+-- Supports the TL-facing Appreciation review list: cases with
+-- is_appreciation=1 get audited against their call recording (joined from
+-- call_logs by call_txn_id) and approved/rejected by a Team Lead.
+-- ALTER TABLE cases
+--   ADD COLUMN appreciation_approved TINYINT NULL DEFAULT NULL COMMENT 'NULL=pending, 1=approved, 0=rejected',
+--   ADD COLUMN appreciation_reviewed_by VARCHAR(100) NOT NULL DEFAULT '',
+--   ADD COLUMN appreciation_reviewed_at TIMESTAMP NULL DEFAULT NULL;
+
 -- ============================================================
 -- To verify the tables were created correctly, run:
 --   SELECT TABLE_NAME, COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLUMN_DEFAULT

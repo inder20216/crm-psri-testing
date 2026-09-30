@@ -111,6 +111,32 @@ export default function ProjectRail() {
           </Link>
         )}
 
+        {/* Raw data export — Admin and Super Admin */}
+        {isAdmin && (
+          <Link
+            to="/admin/reports"
+            className={`rail-item ${pathname === '/admin/reports' ? 'active' : ''}`}
+            style={{ '--rail-color': '#0f766e' }}
+            title="Reports"
+          >
+            <span className="rail-icon">🧾</span>
+            {expanded && <span className="rail-label">Reports</span>}
+          </Link>
+        )}
+
+        {/* Appreciation audit/approval — Admin and Super Admin (TL) */}
+        {isAdmin && (
+          <Link
+            to="/admin/appreciation"
+            className={`rail-item ${pathname === '/admin/appreciation' ? 'active' : ''}`}
+            style={{ '--rail-color': '#b45309' }}
+            title="Appreciation Review"
+          >
+            <span className="rail-icon">🌟</span>
+            {expanded && <span className="rail-label">Appreciation</span>}
+          </Link>
+        )}
+
         {/* Logged-in user avatar + logout */}
         {currentUser && (
           <button

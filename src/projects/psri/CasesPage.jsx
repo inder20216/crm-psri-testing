@@ -330,7 +330,7 @@ function fromApiCase(c) {
     contact: { id: c.contactId, name: c.contactName, mobile: c.contactMobile, mobileIsd: '+91' },
     channel: c.channel, calledNumber: c.calledNumber, callTxnId: c.callTxnId,
     typeOfCall: c.typeOfCall, callFor: c.callFor, typeOfEnquiry: c.typeOfEnquiry,
-    priority: c.priority, queryType: c.queryType || '', status: c.status, summary: c.summary, assignedTo: c.assignedTo,
+    priority: c.priority, queryType: c.queryType || 'Basic', status: c.status, summary: c.summary, assignedTo: c.assignedTo,
     specialty: c.specialty, doctorName: c.doctorName,
     specificDoctorRequested: c.specificDoctorRequested,
     appointmentDate: c.appointmentDate, appointmentTime: c.appointmentTime, appointmentStatus: c.appointmentStatus,
@@ -348,7 +348,7 @@ export default function CasesPage() {
   const { getList } = usePicklists();
   const { getDependentValues } = useDependencies();
   const { users } = useUsers();
-  const { dial, hasWidget, dialerPrefill, setDialerPrefill } = useSparkTG();
+  const { dial, hasWidget, dialerPrefill, setDialerPrefill, backendCallLog } = useSparkTG();
   const [cases, setCases]       = useState([]);
   const [loading, setLoading]   = useState(true);
   const [loadErr, setLoadErr]   = useState('');
@@ -380,6 +380,28 @@ export default function CasesPage() {
   // a plain closure over `form` there would see a stale snapshot.
   const formRef = useRef(form);
   useEffect(() => { formRef.current = form; }, [form]);
+
+  // SparkTG's live widget never tells us call direction for calls dialed
+  // inside the widget itself (confirmed — it sends nothing to distinguish
+  // inbound/outbound there), so Type of Call can start out wrong for that
+  // path. Its backend webhook does carry the real direction, arriving a
+  // few seconds after the call — self-correct here if it disagrees with
+  // what's already on screen, but only for the still-open form for that
+  // exact call (never touch a form the agent has moved on from).
+  useEffect(() => {
+    if (!showForm || backendCallLog?.status !== 'found' || !backendCallLog.record) return;
+    const { callTxnId, direction } = backendCallLog.record;
+    if (!callTxnId || callTxnId !== formRef.current.callTxnId) return;
+    const correct = direction === 'inbound' ? 'Inbound' : direction === 'outbound' ? 'Outbound' : '';
+    if (!correct || correct === formRef.current.typeOfCall) return;
+    // Mirror the dropdown's own onChange — Call For's options depend on
+    // Type of Call, so a stale value from the wrong Type of Call would
+    // otherwise survive as an option no longer in that dropdown's list.
+    setForm(f => (f.callTxnId === callTxnId
+      ? { ...f, typeOfCall: correct, callFor: '', typeOfEnquiry: '', appointmentStatus: '' }
+      : f));
+    showToast(`Type of Call corrected to ${correct} (from call records)`);
+  }, [backendCallLog]);  // eslint-disable-line react-hooks/exhaustive-deps
 
   // Builds the same payload shape handleSave() sends, but tagged as an
   // incomplete/draft record and without the full-case validation — used
@@ -1023,19 +1045,9 @@ export default function CasesPage() {
           </div>
 
           <div className="psri-bottom-meta">
-            {isAdmin && (
-              <div className="psri-field" style={{ maxWidth: 300 }}>
-                <label>Assigned To</label>
-                <select value={form.assignedTo} onChange={e => setForm(f => ({ ...f, assignedTo: e.target.value }))}>
-                  <option value="">— Unassigned —</option>
-                  {users.map(u => <option key={u.id} value={u.id}>{u.name} ({u.role})</option>)}
-                </select>
-              </div>
-            )}
             <div className="psri-field" style={{ maxWidth: 220 }}>
               <label>Query Type</label>
               <select value={form.queryType} onChange={e => setForm(f => ({ ...f, queryType: e.target.value }))}>
-                <option value="">— Select —</option>
                 <option value="Basic">Basic</option>
                 <option value="Detailed">Detailed</option>
               </select>

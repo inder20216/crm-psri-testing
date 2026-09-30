@@ -43,16 +43,40 @@ async function pollAndEnrichCall(callId) {
   }
 }
 
+// Debug-only: polls the CRM's own stored call_logs row (not SparkTG directly)
+// so the debug panel can show exactly what the backend ends up with for a
+// call — including fields like direction that the live widget events never
+// carry. Separate from pollAndEnrichCall above, which drives the real
+// enrichment write; this one only reads and reports back via onUpdate.
+async function pollBackendCallLog(callId, onUpdate) {
+  onUpdate({ callTxnId: callId, status: 'polling', record: null })
+  for (let attempt = 1; attempt <= POLL_ATTEMPTS; attempt++) {
+    await sleep(POLL_DELAY_MS)
+    const rows = await psri.getCallLogs({ callTxnId: callId }).catch(() => [])
+    if (rows && rows.length > 0) {
+      onUpdate({ callTxnId: callId, status: 'found', record: rows[0] })
+      return
+    }
+  }
+  onUpdate({ callTxnId: callId, status: 'timeout', record: null })
+}
+
 export function SparkTGProvider({ children, agentEmail = '' }) {
   const iframeRef       = useRef(null);
   const pendingOutbound = useRef(false);   // true when we sent click_to_call and await show_dialer back
   const hasAutoSso      = useRef(false);   // prevents re-login after manual Logout in widget
+  // Survives dismissCall() clearing callState (e.g. DialerPanel dismisses
+  // the popup right after auto-navigating, long before the call itself
+  // ends) — so the debug panel can always look up "the last call", not
+  // only one that's still actively tracked in callState.
+  const lastCallId      = useRef(null);
   const [ready, setReady]               = useState(false);
   const [ssoStatus, setSsoStatus]       = useState('pending');   // 'pending' | 'success' | 'failed'
   const [callState, setCallState]       = useState(null);        // { phone, name, callId, calledTo, direction, ended }
   const [widgetVisible, setWidgetVisible] = useState(false);
   const [dialerPrefill, setDialerPrefill] = useState(null);
   const [rawEvents, setRawEvents]       = useState([]);          // debug: last 20 raw messages
+  const [backendCallLog, setBackendCallLog] = useState(null);    // debug: { callTxnId, status, record } for the most recent ended call
 
   const sendToWidget = useCallback((event, data = {}) => {
     iframeRef.current?.contentWindow?.postMessage({ event, data }, '*');
@@ -69,18 +93,36 @@ export function SparkTGProvider({ children, agentEmail = '' }) {
 
   const dismissCall = useCallback(() => setCallState(null), []);
 
+  // On-demand debug lookup — click-to-fetch instead of waiting on hide_dialer,
+  // which doesn't reliably fire. Looks up the most recent call regardless of
+  // whether callState still has it.
+  const fetchBackendCallLog = useCallback(() => {
+    const callId = lastCallId.current;
+    if (!callId) { setBackendCallLog({ callTxnId: null, status: 'timeout', record: null }); return; }
+    setBackendCallLog({ callTxnId: callId, status: 'polling', record: null });
+    psri.getCallLogs({ callTxnId: callId })
+      .then(rows => {
+        setBackendCallLog({ callTxnId: callId, status: rows && rows.length > 0 ? 'found' : 'timeout', record: rows?.[0] || null });
+      })
+      .catch(() => setBackendCallLog({ callTxnId: callId, status: 'timeout', record: null }));
+  }, []);
+
   useEffect(() => {
     if (!WIDGET_URL) return;
     function onMessage(ev) {
       const msg = ev.data;
-      if (!msg || typeof msg !== 'object' || !msg.event) return;
 
-      // Capture raw event for debug panel (keep last 20)
+      // Capture EVERY raw postMessage for the debug panel, even ones that
+      // don't match our expected {event, data} shape — otherwise a signal
+      // we're not already reading for (e.g. call direction) would be
+      // silently dropped before we ever saw it.
       setRawEvents(prev => [{
         ts: new Date().toLocaleTimeString(),
-        event: msg.event,
-        data: msg.data,
+        event: (msg && typeof msg === 'object' && msg.event) ? msg.event : '(unrecognized shape)',
+        data: (msg && typeof msg === 'object') ? (msg.data !== undefined ? msg.data : msg) : msg,
       }, ...prev].slice(0, 20));
+
+      if (!msg || typeof msg !== 'object' || !msg.event) return;
 
       const { event, data } = msg;
       switch (event) {
@@ -118,19 +160,24 @@ export function SparkTGProvider({ children, agentEmail = '' }) {
           }));
           setWidgetVisible(true);
           if (callId) {
+            lastCallId.current = callId;
             psri.logCall({ project: 'psri', callTxnId: callId, direction, phone, calledNumber: calledTo, status: 'started', agentEmail });
           }
           break;
         }
-        case 'hide_dialer':
-          setCallState(prev => {
-            if (prev?.callId) {
-              psri.logCall({ project: 'psri', callTxnId: prev.callId, status: 'ended', agentEmail });
-              pollAndEnrichCall(prev.callId).catch(err => console.warn('[telephony] poll/enrich failed:', err.message));
-            }
-            return prev ? { ...prev, ended: true } : null;
-          });
+        case 'hide_dialer': {
+          // Use lastCallId (not callState) — DialerPanel's dismissCall() may
+          // have already nulled callState well before the call actually
+          // ended, which would otherwise silently skip all of this.
+          const endedCallId = lastCallId.current;
+          if (endedCallId) {
+            psri.logCall({ project: 'psri', callTxnId: endedCallId, status: 'ended', agentEmail });
+            pollAndEnrichCall(endedCallId).catch(err => console.warn('[telephony] poll/enrich failed:', err.message));
+            pollBackendCallLog(endedCallId, setBackendCallLog).catch(err => console.warn('[telephony] backend call log poll failed:', err.message));
+          }
+          setCallState(prev => (prev ? { ...prev, ended: true } : null));
           break;
+        }
         default:
           break;
       }
@@ -150,6 +197,7 @@ export function SparkTGProvider({ children, agentEmail = '' }) {
       dialerPrefill, setDialerPrefill,
       sendToWidget,
       rawEvents, clearRawEvents: () => setRawEvents([]),
+      backendCallLog, fetchBackendCallLog,
     }}>
       {children}
     </SparkTGContext.Provider>

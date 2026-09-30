@@ -5,6 +5,7 @@ import { useUsers } from '../../context/UsersContext';
 import { usePicklists } from '../../context/PicklistsContext';
 import { useDependencies } from '../../context/DependenciesContext';
 import { useSparkTG } from '../../context/SparkTGContext';
+import { useAuth } from '../../context/AuthContext';
 import { psri } from '../../api/psri';
 import './Psri.css';
 
@@ -70,6 +71,7 @@ export default function ContactsPage() {
   const { getList: getPicklist } = usePicklists();
   const { getDependentValues } = useDependencies();
   const { dial, hasWidget } = useSparkTG();
+  const { currentUser } = useAuth();
   const [contacts, setContacts]   = useState([]);
   const [loading, setLoading]     = useState(true);
   const [loadErr, setLoadErr]     = useState('');
@@ -104,7 +106,7 @@ export default function ContactsPage() {
 
   const filtered = contacts;
 
-  const openNew = () => { setForm(emptyForm); setErrors({}); setSaveErr(''); setShowForm(true); };
+  const openNew = () => { setForm({ ...emptyForm, assignedTo: currentUser?.id || '' }); setErrors({}); setSaveErr(''); setShowForm(true); };
   const openEdit = (c) => { setForm(c); setErrors({}); setSaveErr(''); setShowForm(true); };
 
   const handleNameBlur = () => setForm(f => ({ ...f, name: titleCase(f.name) }));
@@ -321,7 +323,7 @@ export default function ContactsPage() {
             </div>
             <div className="psri-field">
               <label>Contact Assigned To</label>
-              <select value={form.assignedTo} onChange={e => setForm(f => ({ ...f, assignedTo: e.target.value }))}>
+              <select value={form.assignedTo} disabled>
                 <option value="">— Unassigned —</option>
                 {users.map(u => <option key={u.id} value={u.id}>{u.name} ({u.role})</option>)}
               </select>
