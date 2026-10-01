@@ -10,14 +10,18 @@ const DAY_OPTIONS = [
   { value: 30, label: 'Last 30 days' },
 ];
 
-// SparkTG's disposition vocabulary isn't fixed (Queue Missed, IVR Missed,
-// Agent Missed, NoAnswer, ... today, possibly more labels tomorrow) — string
-// matching against it always has a stale-list bug waiting to happen.
-// duration_seconds doesn't have that problem: a call that was actually
-// picked up and talked on has one, whatever SparkTG decides to call the
-// outcome. Same rule psri-telephony-service already uses server-side for
-// the missed-call streak state machine — keep this in sync with that.
+// duration_seconds is the primary signal (a call that was actually picked up
+// has one, whatever SparkTG calls the outcome) — but proven wrong alone:
+// SparkTG reports non-zero duration (ring time) even on calls it explicitly
+// disposition-tags "missed" (confirmed against real data: disposition
+// "missed" with durationSeconds 15–45). So an explicit "missed"/"no answer"
+// disposition overrides a non-zero duration. Deliberately a narrow override,
+// not full string-matching against SparkTG's whole vocabulary (Queue
+// Missed, IVR Missed, Agent Missed, NoAnswer, ...) — just the two outcomes
+// proven to coexist with a non-zero duration. Same rule
+// psri-telephony-service already uses server-side — keep this in sync with that.
 function isAnswered(call) {
+  if (/missed|no.?answer/i.test(call.disposition || '')) return false;
   return Number(call.durationSeconds) > 0;
 }
 

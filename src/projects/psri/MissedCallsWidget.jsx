@@ -8,6 +8,13 @@ const POLL_INTERVAL_MS = 60000;
 const LOOKBACK_DAYS = 30;
 const MAX_ATTEMPTS = 3;
 
+// Genuine Indian mobile numbers always start 6-9. call_logs.phone also
+// carries internal SparkTG extension/transfer numbers (seen in production:
+// 1130611700, 1161426142, 1145048652, ...) that aren't callable customer
+// numbers at all — without this filter those pollute the callback queue
+// with entries nobody should ever dial back.
+const MOBILE_RE = /^[6-9]\d{9}$/;
+
 // Same callback-attempt state machine that used to run as an n8n Code node:
 // an unanswered inbound call starts (or continues) a missed streak; an
 // unanswered outbound call against an active streak is a failed callback
@@ -17,7 +24,7 @@ const MAX_ATTEMPTS = 3;
 function computeMissedCalls(callLogs) {
   const byPhone = new Map();
   for (const c of callLogs) {
-    if (!c.phone) continue;
+    if (!c.phone || !MOBILE_RE.test(c.phone)) continue;
     if (!byPhone.has(c.phone)) byPhone.set(c.phone, []);
     byPhone.get(c.phone).push(c);
   }
@@ -31,13 +38,19 @@ function computeMissedCalls(callLogs) {
     let failedAttempts = 0;
 
     for (const c of chrono) {
-      // duration_seconds, not disposition — SparkTG's disposition vocabulary
-      // isn't fixed (Queue Missed, IVR Missed, Agent Missed, NoAnswer, ...
-      // today, possibly more tomorrow), so string-matching it always has a
-      // stale-list bug waiting to happen. A call that was actually picked up
-      // has a duration no matter what SparkTG calls the outcome. Same rule
-      // psri-telephony-service already uses server-side — keep in sync.
-      const answered = Number(c.durationSeconds) > 0;
+      // duration_seconds is the primary signal (a call that was actually
+      // picked up has one, whatever SparkTG calls the outcome) — but proven
+      // wrong on its own: SparkTG reports non-zero duration (ring time) even
+      // on calls it explicitly disposition-tags "missed" (confirmed against
+      // real data: disposition "missed" with durationSeconds 15–45). So an
+      // explicit "missed"/"no answer" disposition overrides a non-zero
+      // duration. Deliberately a narrow override, not full string-matching
+      // against SparkTG's whole vocabulary (Queue Missed, IVR Missed, Agent
+      // Missed, NoAnswer, ...) — just the two outcomes proven to coexist
+      // with a non-zero duration. Same rule psri-telephony-service already
+      // uses server-side — keep in sync.
+      const explicitlyMissed = /missed|no.?answer/i.test(c.disposition || '');
+      const answered = !explicitlyMissed && Number(c.durationSeconds) > 0;
       if (answered) { streakStart = null; failedAttempts = 0; continue; }
       if (c.direction === 'inbound') {
         if (!streakStart) streakStart = c;
