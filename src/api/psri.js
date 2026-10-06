@@ -63,6 +63,17 @@ export const psri = {
 
   polishSummary: (data) => post('psri-summary-polish', data),
   validateCase:  (data) => post('psri-case-validate', data),
+  // Fixes spelling/casing on a newly-typed picklist value and flags if it
+  // looks like an existing option under a different name.
+  polishProcedureName: (data) => post('psri-procedure-polish', data),
+
+  // Agent-suggested new picklist values (currently used for Name of
+  // Procedure) — sit pending until an Admin approves/rejects them.
+  suggestPicklistValue: (data) => post('psri-picklist-suggest', data, WF_BASE),
+  getPicklistSuggestions: (status) => get('psri-picklist-suggestions', { status: status || '' }, WF_BASE)
+    .then(d => (d && d.success ? d.suggestions : []))
+    .catch(err => { console.warn('[picklist] getPicklistSuggestions failed:', err.message); return []; }),
+  reviewPicklistSuggestion: (data) => post('psri-picklist-suggestion-review', data, WF_BASE),
 
   getSpecialtySummaries: () => get('psri-specialty-summaries'),
   getGuidance:           () => get('psri-guidance'),
