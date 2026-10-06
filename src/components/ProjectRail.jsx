@@ -137,6 +137,19 @@ export default function ProjectRail() {
           </Link>
         )}
 
+        {/* New picklist value approval — Admin and Super Admin */}
+        {isAdmin && (
+          <Link
+            to="/admin/picklist-suggestions"
+            className={`rail-item ${pathname === '/admin/picklist-suggestions' ? 'active' : ''}`}
+            style={{ '--rail-color': '#7c3aed' }}
+            title="Picklist Suggestions"
+          >
+            <span className="rail-icon">📋</span>
+            {expanded && <span className="rail-label">Suggestions</span>}
+          </Link>
+        )}
+
         {/* Logged-in user avatar + logout */}
         {currentUser && (
           <button

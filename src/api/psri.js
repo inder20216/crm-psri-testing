@@ -63,6 +63,17 @@ export const psri = {
 
   polishSummary: (data) => post('psri-summary-polish', data),
   validateCase:  (data) => post('psri-case-validate', data),
+  // Fixes spelling/casing on a newly-typed picklist value and flags if it
+  // looks like an existing option under a different name.
+  polishProcedureName: (data) => post('psri-procedure-polish', data),
+
+  // Agent-suggested new picklist values (currently used for Name of
+  // Procedure) — sit pending until an Admin approves/rejects them.
+  suggestPicklistValue: (data) => post('psri-picklist-suggest', data, WF_BASE),
+  getPicklistSuggestions: (status) => get('psri-picklist-suggestions', { status: status || '' }, WF_BASE)
+    .then(d => (d && d.success ? d.suggestions : []))
+    .catch(err => { console.warn('[picklist] getPicklistSuggestions failed:', err.message); return []; }),
+  reviewPicklistSuggestion: (data) => post('psri-picklist-suggestion-review', data, WF_BASE),
 
   getSpecialtySummaries: () => get('psri-specialty-summaries'),
   getGuidance:           () => get('psri-guidance'),
@@ -94,14 +105,14 @@ export const psri = {
     .catch(err => { console.warn('[telephony] getCallLogs failed:', err.message); return []; }),
 
   // Prospects — unconverted "Enquiry or Transfer" leads, one row per contact,
-  // maintained server-side by n8n_psri_case_add_mysql.json as cases come in.
-  getProspects: (opts) => get('psri-prospects', typeof opts === 'string' ? { status: opts } : (opts || {}))
+  // maintained server-side by cases.php's cases_add() as cases come in.
+  getProspects: (opts) => get('psri-prospects', typeof opts === 'string' ? { status: opts } : (opts || {}), WF_BASE)
     .then(d => (d && d.success ? d.prospects : []))
     .catch(err => { console.warn('[prospects] getProspects failed:', err.message); return []; }),
-  updateProspect:        (data) => post('psri-prospect-update', data),
-  recordProspectCallAttempt: (data) => post('psri-prospect-call-attempt', data)
+  updateProspect:        (data) => post('psri-prospect-update', data, WF_BASE),
+  recordProspectCallAttempt: (data) => post('psri-prospect-call-attempt', data, WF_BASE)
     .catch(err => console.warn('[prospects] call attempt log failed:', err.message)),
-  getProspectActivity: (prospectId) => get('psri-prospect-activity', { prospectId })
+  getProspectActivity: (prospectId) => get('psri-prospect-activity', { prospectId }, WF_BASE)
     .then(d => (d && d.success ? d.activity : []))
     .catch(err => { console.warn('[prospects] getProspectActivity failed:', err.message); return []; }),
 

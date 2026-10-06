@@ -62,14 +62,32 @@ function computeMissedCalls(callLogs) {
     if (!streakStart) continue;
     if (failedAttempts >= MAX_ATTEMPTS) continue;
 
-    results.push({ phone, stage: failedAttempts + 1, missedSince: streakStart.startedAt });
+    results.push({
+      phone,
+      stage: failedAttempts + 1,
+      missedSince: streakStart.startedAt,
+      contactName: streakStart.contactName || '',
+    });
   }
   return results;
+}
+
+function fmtSince(dt) {
+  const d = new Date(dt);
+  if (isNaN(d)) return dt;
+  const diffMs = Date.now() - d.getTime();
+  const mins = Math.round(diffMs / 60000);
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.round(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.round(hours / 24);
+  return `${days}d ago (${d.toLocaleDateString('en-IN')} ${d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })})`;
 }
 
 export default function MissedCallsWidget() {
   const { dial } = useSparkTG();
   const [calls, setCalls] = useState([]);
+  const [listOpen, setListOpen] = useState(false);
 
   const refresh = useCallback(() => {
     psri.getCallLogs({ days: LOOKBACK_DAYS, limit: 5000 })
@@ -95,20 +113,75 @@ export default function MissedCallsWidget() {
   const counts = { 1: 0, 2: 0, 3: 0 };
   calls.forEach(c => { counts[c.stage] = (counts[c.stage] || 0) + 1; });
 
+  const recentMissedList = calls
+    .filter(c => c.stage === 1)
+    .sort((a, b) => new Date(a.missedSince) - new Date(b.missedSince));
+
   return (
     <div className="mc-bar" title="Missed Calls — click a stage to call back the oldest one first (FIFO)">
-      {[1, 2].map(stage => (
+      <div style={{ position: 'relative', display: 'flex', alignItems: 'stretch' }}>
         <button
-          key={stage}
           type="button"
-          className={`mc-bar-btn mc-bar-btn--${stage}`}
-          onClick={() => callFifo(stage)}
-          disabled={counts[stage] === 0}
+          className="mc-bar-btn mc-bar-btn--1"
+          onClick={() => callFifo(1)}
+          disabled={counts[1] === 0}
         >
-          <span className="mc-bar-label">{STAGE_LABEL[stage]}</span>
-          <span className="mc-bar-count">{counts[stage]}</span>
+          <span className="mc-bar-label">{STAGE_LABEL[1]}</span>
+          <span className="mc-bar-count">{counts[1]}</span>
         </button>
-      ))}
+        <button
+          type="button"
+          onClick={() => setListOpen(v => !v)}
+          title="View the Recent Missed list"
+          style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 14, padding: '0 4px', color: '#64748b' }}
+        >
+          {listOpen ? '▲' : '▾'}
+        </button>
+
+        {listOpen && (
+          <div style={{
+            position: 'absolute', top: '100%', left: 0, marginTop: 6, zIndex: 50,
+            background: '#fff', border: '1px solid #e2e8f0', borderRadius: 10,
+            boxShadow: '0 8px 24px rgba(0,0,0,0.12)', width: 340, maxHeight: 420, overflowY: 'auto',
+          }}>
+            <div style={{ padding: '10px 14px', borderBottom: '1px solid #f1f5f9', fontWeight: 700, fontSize: 13, display: 'flex', justifyContent: 'space-between' }}>
+              <span>Recent Missed ({recentMissedList.length})</span>
+              <button type="button" onClick={() => setListOpen(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8' }}>✕</button>
+            </div>
+            {recentMissedList.length === 0 && (
+              <div style={{ padding: 16, textAlign: 'center', color: '#94a3b8', fontSize: 13 }}>Nothing pending — all clear.</div>
+            )}
+            {recentMissedList.map(c => (
+              <div key={c.phone} style={{ padding: '10px 14px', borderBottom: '1px solid #f8fafc', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontWeight: 700, fontSize: 13 }}>{c.contactName || c.phone}</div>
+                  <div style={{ fontSize: 11, color: '#94a3b8' }}>
+                    {c.contactName ? c.phone + ' · ' : ''}missed {fmtSince(c.missedSince)}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className="admin-btn-primary"
+                  style={{ fontSize: 12, padding: '6px 10px', flexShrink: 0 }}
+                  onClick={() => dial(c.phone)}
+                >
+                  Call
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <button
+        type="button"
+        className="mc-bar-btn mc-bar-btn--2"
+        onClick={() => callFifo(2)}
+        disabled={counts[2] === 0}
+      >
+        <span className="mc-bar-label">{STAGE_LABEL[2]}</span>
+        <span className="mc-bar-count">{counts[2]}</span>
+      </button>
     </div>
   );
 }

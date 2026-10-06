@@ -121,6 +121,131 @@ function SearchableSelect({ value, onChange, options, placeholder = '— Select 
   );
 }
 
+// Like SearchableSelect, but for "Name of Procedure" specifically: when the
+// typed text matches nothing existing, the agent can get it AI-polished
+// (spelling/casing fix, flags likely duplicates by meaning not just by
+// string) and/or suggest it as a new picklist value. The suggestion is
+// usable on this case immediately — approval only controls whether it
+// becomes a selectable option for future agents (confirmed with the user).
+function ProcedureNameField({ value, onChange, options, agentId, agentName, onToast }) {
+  const [search, setSearch]   = useState('');
+  const [open, setOpen]       = useState(false);
+  const [polishing, setPolishing] = useState(false);
+  const [suggesting, setSuggesting] = useState(false);
+  const [confirm, setConfirm] = useState(null); // { similar: [...] } once backend asks to confirm
+  const [polishNote, setPolishNote] = useState('');
+  const wrapRef = useRef(null);
+  const filtered = options.filter(o => o.toLowerCase().includes(search.toLowerCase()));
+  const hasExactMatch = options.some(o => o.toLowerCase() === search.trim().toLowerCase());
+
+  useEffect(() => {
+    function handleOutside(e) {
+      if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false);
+    }
+    document.addEventListener('mousedown', handleOutside);
+    return () => document.removeEventListener('mousedown', handleOutside);
+  }, []);
+
+  const resetSuggestState = () => { setConfirm(null); setPolishNote(''); };
+
+  const doPolish = async () => {
+    if (!search.trim()) return;
+    setPolishing(true);
+    try {
+      const res = await psri.polishProcedureName({ value: search, existingValues: options });
+      if (res?.corrected) setSearch(res.corrected);
+      setPolishNote(res?.likelyDuplicateOf ? `This looks like it may be the same as "${res.likelyDuplicateOf}" — use that instead, or suggest this as new if it's genuinely different.` : '');
+    } catch (err) {
+      onToast?.(err.message || 'Could not polish — please try again.');
+    } finally {
+      setPolishing(false);
+    }
+  };
+
+  const doSuggest = async (force = false) => {
+    const val = search.trim();
+    if (!val) return;
+    setSuggesting(true);
+    try {
+      const res = await psri.suggestPicklistValue({ listName: 'Name of Procedure', value: val, agentId, agentName, force });
+      if (res?.needsConfirmation) {
+        setConfirm({ similar: res.similar || [] });
+        return;
+      }
+      onChange(val);
+      setOpen(false);
+      setSearch('');
+      resetSuggestState();
+      onToast?.(`"${val}" added — now on this case, pending approval for future use`);
+    } catch (err) {
+      onToast?.(err.message || 'Could not suggest this value — please try again.');
+    } finally {
+      setSuggesting(false);
+    }
+  };
+
+  return (
+    <div className="psri-searchable-select" ref={wrapRef}>
+      <input
+        type="text"
+        className="psri-searchable-input"
+        placeholder={open ? 'Type to filter or add new…' : (value || '— Select —')}
+        value={open ? search : ''}
+        onFocus={() => { setOpen(true); setSearch(''); resetSuggestState(); }}
+        onChange={e => { setSearch(e.target.value); setOpen(true); resetSuggestState(); }}
+      />
+      {open && (
+        <div className="psri-searchable-dropdown">
+          {value && (
+            <div className="psri-searchable-item psri-searchable-clear"
+              onMouseDown={() => { onChange(''); setOpen(false); setSearch(''); }}>
+              — Clear selection —
+            </div>
+          )}
+          {filtered.map(o => (
+            <div key={o}
+              className={`psri-searchable-item${o === value ? ' selected' : ''}`}
+              onMouseDown={() => { onChange(o); setOpen(false); setSearch(''); }}>
+              {o}
+            </div>
+          ))}
+          {filtered.length === 0 && !search && <div className="psri-searchable-empty">No matches</div>}
+
+          {search.trim() && !hasExactMatch && (
+            <div style={{ borderTop: '1px solid #e2e8f0', padding: 8 }} onMouseDown={e => e.preventDefault()}>
+              {confirm ? (
+                <>
+                  <p style={{ fontSize: 12, color: '#b45309', margin: '0 0 6px' }}>
+                    Similar to: {confirm.similar.join(', ')}. Add "{search.trim()}" as a new, different procedure anyway?
+                  </p>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <button type="button" className="psri-btn-ghost" disabled={suggesting} onClick={() => doSuggest(true)} style={{ fontSize: 12 }}>
+                      Yes, it's different
+                    </button>
+                    <button type="button" className="psri-btn-ghost" onClick={resetSuggestState} style={{ fontSize: 12 }}>Cancel</button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  {polishNote && <p style={{ fontSize: 12, color: '#b45309', margin: '0 0 6px' }}>{polishNote}</p>}
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <button type="button" className="psri-ai-polish-btn" disabled={polishing} onClick={doPolish}>
+                      {polishing ? 'Polishing…' : '✦ Polish'}
+                    </button>
+                    <button type="button" className="psri-btn-ghost" disabled={suggesting} onClick={() => doSuggest(false)} style={{ fontSize: 12 }}>
+                      {suggesting ? 'Submitting…' : `➕ Suggest "${search.trim()}" as new`}
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ContactHistoryPanel({ contact, excludeCaseId }) {
   const [cases, setCases]     = useState([]);
   const [loading, setLoading] = useState(false);
@@ -997,10 +1122,13 @@ export default function CasesPage() {
                 </div>
                 <div className="psri-field">
                   <label>Name of Procedure</label>
-                  <SearchableSelect
+                  <ProcedureNameField
                     value={form.nameOfProcedure}
                     onChange={v => setForm(f => ({ ...f, nameOfProcedure: v }))}
                     options={getList('Name of Procedure')}
+                    agentId={currentAgentId}
+                    agentName={currentUser?.name || ''}
+                    onToast={showToast}
                   />
                 </div>
               </div>

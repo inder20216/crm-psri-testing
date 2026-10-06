@@ -14,6 +14,14 @@
  *   GET  psri-high-value-export?from=&to= → CSV download, cases WHERE is_high_value=1 only
  *   GET  psri-appreciation-list?status=   → { success, cases:[…] } (status: pending|approved|rejected, blank=all) — includes recordingUrl
  *   POST psri-appreciation-review {caseId,approved,reviewedBy} → { success, id, message } (400 + error on invalid)
+ *   GET  psri-prospects?status=&limit=    → { success, prospects:[…], count } (status defaults to 'Followup')
+ *   POST psri-prospect-update {id,callStatus,leadStatus,finalStatus,nextCallAt,remarks,assignedTo,agentId,agentName} → { success, id, message }
+ *   POST psri-prospect-call-attempt {id,agentId,agentName} → { success, id, message }
+ *   GET  psri-prospect-activity?prospectId= → { success, activity:[…] }
+ *   POST psri-picklist-suggest {listName,value,agentId,agentName,force?} → { success, id, message } OR
+ *                                             { success:false, needsConfirmation:true, similar:[…] } (HTTP 200, not an error — ask the agent, then resend with force:true)
+ *   GET  psri-picklist-suggestions?status= → { success, suggestions:[…] } (status: pending|approved|rejected, blank=all)
+ *   POST psri-picklist-suggestion-review {id,approved,reviewerId,reviewerName} → { success, id, message, warning? }
  *
  *   GET  psri-workflow-get                    → { success, workflows:[…] }
  *   POST psri-workflow-save        {id?,name,trigger,status,config,updatedBy}
@@ -36,6 +44,8 @@ require_once __DIR__ . '/runner.php';
 require_once __DIR__ . '/contacts.php';
 require_once __DIR__ . '/cases.php';
 require_once __DIR__ . '/reports.php';
+require_once __DIR__ . '/prospects.php';
+require_once __DIR__ . '/picklist_suggestions.php';
 
 if (PHP_SAPI === 'cli') {
     $cmd = $argv[1] ?? '';
@@ -142,6 +152,37 @@ try {
 
         case 'psri-appreciation-review':
             $res = cases_appreciation_review($body);
+            if (isset($res['error'])) api_out(['success' => false, 'error' => $res['error']], 400);
+            api_out(['success' => true] + $res);
+
+        case 'psri-prospects':
+            $prospects = prospects_list((string) ($_GET['status'] ?? ''), (int) ($_GET['limit'] ?? 0));
+            api_out(['success' => true, 'prospects' => $prospects, 'count' => count($prospects)]);
+
+        case 'psri-prospect-update':
+            $res = prospects_update($body);
+            if (isset($res['error'])) api_out(['success' => false, 'error' => $res['error']], 400);
+            api_out(['success' => true] + $res);
+
+        case 'psri-prospect-call-attempt':
+            $res = prospects_call_attempt($body);
+            if (isset($res['error'])) api_out(['success' => false, 'error' => $res['error']], 400);
+            api_out(['success' => true] + $res);
+
+        case 'psri-prospect-activity':
+            api_out(['success' => true, 'activity' => prospects_activity_list((string) ($_GET['prospectId'] ?? ''))]);
+
+        case 'psri-picklist-suggest':
+            $res = ps_suggest($body);
+            if (isset($res['error'])) api_out(['success' => false, 'error' => $res['error']], 400);
+            if (!empty($res['needsConfirmation'])) api_out(['success' => false] + $res, 200);
+            api_out(['success' => true] + $res);
+
+        case 'psri-picklist-suggestions':
+            api_out(['success' => true, 'suggestions' => ps_list((string) ($_GET['status'] ?? ''))]);
+
+        case 'psri-picklist-suggestion-review':
+            $res = ps_review($body);
             if (isset($res['error'])) api_out(['success' => false, 'error' => $res['error']], 400);
             api_out(['success' => true] + $res);
 

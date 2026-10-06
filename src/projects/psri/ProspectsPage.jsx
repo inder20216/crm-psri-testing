@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { usePicklists } from '../../context/PicklistsContext';
 import { useUsers } from '../../context/UsersContext';
 import { useAuth } from '../../context/AuthContext';
@@ -49,6 +49,55 @@ function describeActivity(a) {
   }
 }
 
+function fmtDuration(sec) {
+  const n = Number(sec);
+  if (!Number.isFinite(n) || n <= 0) return '';
+  const m = Math.floor(n / 60);
+  const s = n % 60;
+  return m > 0 ? `${m}m ${s}s` : `${s}s`;
+}
+
+// duration>0 alone misclassifies real missed calls (SparkTG reports ring
+// time even on calls it disposition-tags "missed") — same override already
+// applied in MissedCallsWidget/ProductivityPage; keep in sync with those.
+function isCallAnswered(c) {
+  if (/missed|no.?answer/i.test(c.disposition || '')) return false;
+  return Number(c.durationSeconds) > 0;
+}
+
+function describeCall(c) {
+  const dir = c.direction === 'inbound' ? '📥 Inbound' : '📤 Outbound';
+  const outcome = isCallAnswered(c) ? 'Answered' : 'Missed';
+  const dur = fmtDuration(c.durationSeconds);
+  return `${dir} call — ${outcome}${dur ? ` (${dur})` : ''}`;
+}
+
+// Merges the prospect's own activity log (status changes, remarks, system
+// notes) with its actual call history (inbound/outbound, from call_logs —
+// matched by mobile, since that's the only link available) into one
+// newest-first timeline, so the TL sees everything in one place instead of
+// having to cross-reference two separate views. casesByTxn (keyed by
+// callTxnId) attaches the actual enquiry/summary to whichever call created
+// or discussed it, so the row shows what the query was about, not just
+// "Inbound call — Answered".
+function buildTimeline(activity, calls, casesByTxn) {
+  const rows = [
+    ...activity.map(a => ({ ts: a.created, kind: 'activity', key: `a${a.id}`, text: describeActivity(a) })),
+    ...calls.map(c => {
+      const linkedCase = casesByTxn[c.callTxnId];
+      return {
+        ts: c.startedAt,
+        kind: 'call',
+        key: `c${c.callTxnId}`,
+        text: describeCall(c),
+        recordingUrl: c.recordingUrl,
+        queryDetails: linkedCase ? [linkedCase.typeOfEnquiry, linkedCase.summary].filter(Boolean).join(' — ') : '',
+      };
+    }),
+  ];
+  return rows.sort((a, b) => new Date(b.ts) - new Date(a.ts));
+}
+
 const emptyEdit = { callStatus: '', leadStatus: '', finalStatus: '', nextCallAt: '', remarks: '', assignedTo: '' };
 
 export default function ProspectsPage() {
@@ -66,8 +115,24 @@ export default function ProspectsPage() {
   const [saveErr, setSaveErr]     = useState('');
   const [toast, setToast]         = useState('');
   const [activity, setActivity]         = useState([]);
+  const [calls, setCalls]               = useState([]);
+  const [casesByTxn, setCasesByTxn]     = useState({});
   const [activityLoading, setActivityLoading] = useState(false);
-  const [activityOpen, setActivityOpen] = useState(false);
+  const [playingKey, setPlayingKey]     = useState('');
+  const audioRef = useRef(null);
+
+  const toggleRecording = (row) => {
+    const audio = audioRef.current;
+    if (!audio || !row.recordingUrl) return;
+    if (playingKey === row.key) {
+      audio.pause();
+      setPlayingKey('');
+      return;
+    }
+    audio.src = row.recordingUrl;
+    audio.play();
+    setPlayingKey(row.key);
+  };
 
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(''), 2500); };
 
@@ -93,20 +158,37 @@ export default function ProspectsPage() {
       assignedTo: p.assignedTo || '',
     });
     setSaveErr('');
-    setActivityOpen(false);
     setActivity([]);
+    setCalls([]);
+    setCasesByTxn({});
+    setPlayingKey('');
+    if (audioRef.current) audioRef.current.pause();
+    loadHistory(p);
   };
 
-  const loadActivity = (prospectId) => {
+  // Loads the full timeline in stages: the prospect's own activity log,
+  // its call history (searched by mobile — the only link call_logs has
+  // back to a prospect), then — once we know which calls happened — the
+  // actual cases those calls created/discussed, so each call row can show
+  // what the query was about instead of just its duration/outcome.
+  const loadHistory = (p) => {
     setActivityLoading(true);
-    psri.getProspectActivity(prospectId)
-      .then(setActivity)
+    Promise.all([
+      psri.getProspectActivity(p.id),
+      p.contactMobile ? psri.getCallLogs({ q: p.contactMobile, limit: 100 }) : Promise.resolve([]),
+    ])
+      .then(([a, c]) => {
+        setActivity(a);
+        setCalls(c);
+        const txnIds = c.map(x => x.callTxnId).filter(Boolean);
+        if (txnIds.length === 0) return;
+        return psri.getCases({ callTxnIds: txnIds.join(',') }).then(res => {
+          const map = {};
+          (res.cases || []).forEach(cs => { if (cs.callTxnId) map[cs.callTxnId] = cs; });
+          setCasesByTxn(map);
+        }).catch(() => {});
+      })
       .finally(() => setActivityLoading(false));
-  };
-
-  const toggleActivity = () => {
-    if (!activityOpen && selected) loadActivity(selected.id);
-    setActivityOpen(o => !o);
   };
 
   const handleSave = async () => {
@@ -130,7 +212,7 @@ export default function ProspectsPage() {
       });
       showToast('Prospect updated');
       await refresh();
-      if (activityOpen) loadActivity(selected.id);
+      loadHistory(selected);
     } catch (err) {
       setSaveErr(err.message || 'Could not save. Please try again.');
     } finally {
@@ -200,13 +282,48 @@ export default function ProspectsPage() {
 
               <div className="psri-detail-grid">
                 <div className="psri-detail-item"><span>Mobile</span><strong>{selected.contactMobile || '—'}</strong></div>
-                <div className="psri-detail-item"><span>Enquiries</span><strong>{selected.enquiryCount || 0}{selected.enquiryTypes ? ` — ${selected.enquiryTypes}` : ''}</strong></div>
                 <div className="psri-detail-item"><span>First Call Date</span><strong>{fmtDate(selected.firstCallDate)}</strong></div>
                 <div className="psri-detail-item"><span>Attempts</span><strong>{selected.attempts || 0}</strong></div>
                 <div className="psri-detail-item"><span>Last Call</span><strong>{fmtWhen(selected.lastCallAt)}</strong></div>
               </div>
 
-              <div className="psri-form" style={{ marginTop: 4 }}>
+              <div className="psri-side-card" style={{ marginTop: 16 }}>
+                <div className="psri-side-card-title">History — Calls &amp; Status Changes</div>
+                {activityLoading && <p className="cp-hint">Loading…</p>}
+                {!activityLoading && activity.length === 0 && calls.length === 0 && (
+                  <p className="cp-hint">No history yet — nothing logged for this lead.</p>
+                )}
+                {!activityLoading && (activity.length > 0 || calls.length > 0) && (
+                  <div className="psri-side-results">
+                    {buildTimeline(activity, calls, casesByTxn).map(row => (
+                      <div key={row.key} className="psri-side-result-item" style={{ cursor: 'default' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+                          <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            {row.recordingUrl && (
+                              <button
+                                type="button"
+                                onClick={() => toggleRecording(row)}
+                                title={playingKey === row.key ? 'Pause recording' : 'Play recording'}
+                                style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 15, padding: 0, lineHeight: 1 }}
+                              >
+                                {playingKey === row.key ? '⏸️' : '▶️'}
+                              </button>
+                            )}
+                            <span>{row.text}</span>
+                          </span>
+                          <span className="cp-hint" style={{ margin: 0, flexShrink: 0 }}>{fmtWhen(row.ts)}</span>
+                        </div>
+                        {row.queryDetails && (
+                          <p className="cp-hint" style={{ margin: '4px 0 0', paddingLeft: row.recordingUrl ? 21 : 0 }}>{row.queryDetails}</p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <audio ref={audioRef} onEnded={() => setPlayingKey('')} style={{ display: 'none' }} />
+              </div>
+
+              <div className="psri-form" style={{ marginTop: 16 }}>
                 <div className="psri-form-row">
                   <div className="psri-field">
                     <label>Call Status</label>
@@ -251,33 +368,10 @@ export default function ProspectsPage() {
               </div>
 
               <div className="psri-form-actions-sticky">
-                <button type="button" className="psri-btn-ghost" onClick={toggleActivity}>
-                  {activityOpen ? 'Hide History' : '🕘 View History'}
-                </button>
                 <button type="button" className="psri-btn-primary" onClick={handleSave} disabled={saving}>
                   {saving ? 'Saving…' : 'Save Changes'}
                 </button>
               </div>
-
-              {activityOpen && (
-                <div className="psri-side-card" style={{ marginTop: 16 }}>
-                  <div className="psri-side-card-title">Activity Log</div>
-                  {activityLoading && <p className="cp-hint">Loading…</p>}
-                  {!activityLoading && activity.length === 0 && <p className="cp-hint">No activity recorded yet.</p>}
-                  {!activityLoading && activity.length > 0 && (
-                    <div className="psri-side-results">
-                      {activity.map(a => (
-                        <div key={a.id} className="psri-side-result-item" style={{ cursor: 'default' }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <span>{describeActivity(a)}</span>
-                            <span className="cp-hint" style={{ margin: 0 }}>{fmtWhen(a.created)}</span>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
             </div>
           )}
         </div>
