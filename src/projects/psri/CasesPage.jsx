@@ -679,6 +679,23 @@ export default function CasesPage() {
     [patientGroups, selectedKey]
   );
 
+  // Recording links for the selected patient's call history. The call-logs
+  // API has no lookup-by-callTxnId, but its search param does filter
+  // server-side by phone — so one fetch by mobile number covers every case
+  // in this patient's history, and we match each case's own callTxnId
+  // against the result client-side.
+  const [contactCallLogs, setContactCallLogs] = useState([]);
+  useEffect(() => {
+    const mobile = selectedGroup?.contactMobile;
+    if (!mobile) { setContactCallLogs([]); return; }
+    psri.getCallLogs(mobile).then(setContactCallLogs);
+  }, [selectedGroup?.contactMobile]);
+
+  const recordingByTxnId = useMemo(
+    () => new Map(contactCallLogs.filter(c => c.recordingUrl).map(c => [c.callTxnId, c.recordingUrl])),
+    [contactCallLogs]
+  );
+
   const toggleCaseExpand = (id) => {
     setExpandedCaseIds(prev => {
       const next = new Set(prev);
@@ -1371,6 +1388,12 @@ export default function CasesPage() {
                           {c.isHighValue     && <div className="psri-hd-row"><span>High Value</span><strong>Yes</strong></div>}
                           <div className="psri-hd-row"><span>Assigned To</span><strong>{users.find(u => u.id === c.assignedTo)?.name || '—'}</strong></div>
                           {c.isAppreciation  && <div className="psri-hd-row"><span>Appreciation</span><strong>{c.appreciationDetails || 'Yes'}</strong></div>}
+                          {c.callTxnId && recordingByTxnId.get(c.callTxnId) && (
+                            <div className="psri-hd-row">
+                              <span>Call Recording</span>
+                              <a href={recordingByTxnId.get(c.callTxnId)} target="_blank" rel="noreferrer" className="psri-btn-ghost">▶ Play</a>
+                            </div>
+                          )}
                           <button type="button" className="psri-btn-ghost" style={{ marginTop: 8 }} onClick={() => openEdit(c)}>Edit this case</button>
                         </div>
                       )}

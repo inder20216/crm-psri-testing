@@ -73,14 +73,21 @@ function describeCall(c) {
 }
 
 // Merges the prospect's own activity log (status changes, remarks, system
-// notes) with its actual call history (inbound/outbound, from call_logs —
-// matched by mobile, since that's the only link available) into one
-// newest-first timeline, so the TL sees everything in one place instead of
-// having to cross-reference two separate views. casesByTxn (keyed by
-// callTxnId) attaches the actual enquiry/summary to whichever call created
-// or discussed it, so the row shows what the query was about, not just
-// "Inbound call — Answered".
-function buildTimeline(activity, calls, casesByTxn) {
+// notes), its actual call history (inbound/outbound, from call_logs —
+// matched by mobile, since that's the only link available), and the
+// contact's full case history into one newest-first timeline, so the TL
+// sees everything in one place instead of having to cross-reference three
+// separate views. casesByTxn (keyed by callTxnId) attaches the actual
+// enquiry/summary to whichever call created or discussed it, so that row
+// shows what the query was about, not just "Inbound call — Answered".
+// allCases covers the rest: every case for this contact, including ones
+// from before the Prospects feature existed or whose call never got logged
+// (fake/manual test callTxnIds, SparkTG gaps) — so a contact's full case
+// history always shows here even when call-log matching finds nothing.
+// Cases already surfaced via a matched call are skipped to avoid showing
+// the same enquiry twice.
+function buildTimeline(activity, calls, casesByTxn, allCases) {
+  const shownCaseIds = new Set(Object.values(casesByTxn).map(c => c.id));
   const rows = [
     ...activity.map(a => ({ ts: a.created, kind: 'activity', key: `a${a.id}`, text: describeActivity(a) })),
     ...calls.map(c => {
@@ -94,6 +101,13 @@ function buildTimeline(activity, calls, casesByTxn) {
         queryDetails: linkedCase ? [linkedCase.typeOfEnquiry, linkedCase.summary].filter(Boolean).join(' — ') : '',
       };
     }),
+    ...allCases.filter(c => !shownCaseIds.has(c.id)).map(c => ({
+      ts: c.created,
+      kind: 'case',
+      key: `cs${c.id}`,
+      text: `${c.callFor || c.typeOfCall || 'Case'}${c.status ? ' · ' + c.status : ''}`,
+      queryDetails: [c.typeOfEnquiry, c.summary].filter(Boolean).join(' — '),
+    })),
   ];
   return rows.sort((a, b) => new Date(b.ts) - new Date(a.ts));
 }
@@ -104,7 +118,9 @@ export default function ProspectsPage() {
   const { getList } = usePicklists();
   const { users } = useUsers();
   const { currentUser, isAdmin } = useAuth();
-  const { dial, hasWidget } = useSparkTG();
+  const { dial, hasWidget, callState } = useSparkTG();
+  const pendingCallProspect = useRef(null); // prospect id currently being dialed, awaiting SparkTG's real callId
+  const loggedCallIds = useRef(new Set());  // guards against re-logging the same callId on later callState updates
 
   const [prospects, setProspects] = useState([]);
   const [loading, setLoading]     = useState(true);
@@ -117,6 +133,7 @@ export default function ProspectsPage() {
   const [activity, setActivity]         = useState([]);
   const [calls, setCalls]               = useState([]);
   const [casesByTxn, setCasesByTxn]     = useState({});
+  const [linkedCases, setLinkedCases]   = useState([]);
   const [activityLoading, setActivityLoading] = useState(false);
   const [playingKey, setPlayingKey]     = useState('');
   const audioRef = useRef(null);
@@ -161,6 +178,7 @@ export default function ProspectsPage() {
     setActivity([]);
     setCalls([]);
     setCasesByTxn({});
+    setLinkedCases([]);
     setPlayingKey('');
     if (audioRef.current) audioRef.current.pause();
     loadHistory(p);
@@ -170,16 +188,23 @@ export default function ProspectsPage() {
   // its call history (searched by mobile — the only link call_logs has
   // back to a prospect), then — once we know which calls happened — the
   // actual cases those calls created/discussed, so each call row can show
-  // what the query was about instead of just its duration/outcome.
+  // what the query was about instead of just its duration/outcome. Also
+  // pulls every case for this contact directly (same lookup Cases' own
+  // Contact History panel uses) — call-log matching alone misses a lot in
+  // practice: cases from before Prospects existed, or ones whose call was
+  // never really logged (manual/test entries), so the contact's case
+  // history would otherwise just be missing from here.
   const loadHistory = (p) => {
     setActivityLoading(true);
     Promise.all([
       psri.getProspectActivity(p.id),
       p.contactMobile ? psri.getCallLogs({ q: p.contactMobile, limit: 100 }) : Promise.resolve([]),
+      p.contactMobile ? psri.getCases(p.contactMobile).then(res => res.cases || []).catch(() => []) : Promise.resolve([]),
     ])
-      .then(([a, c]) => {
+      .then(([a, c, cs]) => {
         setActivity(a);
         setCalls(c);
+        setLinkedCases(cs);
         const txnIds = c.map(x => x.callTxnId).filter(Boolean);
         if (txnIds.length === 0) return;
         return psri.getCases({ callTxnIds: txnIds.join(',') }).then(res => {
@@ -221,9 +246,31 @@ export default function ProspectsPage() {
   };
 
   const handleCall = (p) => {
-    dial(p.contactMobile);
-    psri.recordProspectCallAttempt({ id: p.id, agentId: currentUser?.id || '', agentName: currentUser?.name || '' });
+    pendingCallProspect.current = p.id;
+    dial(p.contactMobile, { origin: 'prospect', refId: p.id });
   };
+
+  // The attempt is logged once SparkTG actually hands back a real call id
+  // (origin 'prospect' tells DialerPanel to stay out of the way for this
+  // call) rather than at the moment the button is clicked — so the log
+  // entry — and the attempts counter — reflect a call that genuinely
+  // reached the phone system, carrying its real transaction id, instead of
+  // a button click that might never connect.
+  useEffect(() => {
+    if (!callState?.callId || callState.origin !== 'prospect' || !callState.refId) return;
+    if (callState.refId !== pendingCallProspect.current) return;
+    if (loggedCallIds.current.has(callState.callId)) return;
+    loggedCallIds.current.add(callState.callId);
+    psri.recordProspectCallAttempt({
+      id: callState.refId,
+      agentId: currentUser?.id || '',
+      agentName: currentUser?.name || '',
+      callTxnId: callState.callId,
+    }).then(() => {
+      refresh();
+      if (selected?.id === callState.refId) loadHistory(selected);
+    });
+  }, [callState, currentUser, refresh]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="psri-page">
@@ -252,9 +299,10 @@ export default function ProspectsPage() {
                 <div className="psri-contact-name">{p.contactName || 'Unknown Contact'}</div>
                 <div className="psri-contact-meta">
                   <span>{p.contactMobile}</span>
-                  {p.leadStatus && <span className="psri-badge">{p.leadStatus}</span>}
+                  <span className="psri-badge">{p.leadStatus || 'New'}</span>
                   {p.attempts > 0 && <span className="psri-badge">{p.attempts} attempt{p.attempts !== 1 ? 's' : ''}</span>}
                 </div>
+                {p.enquiryTypes && <div className="cp-hint" style={{ margin: '2px 0 0' }}>{p.enquiryTypes}</div>}
               </div>
             </div>
           ))}
@@ -290,12 +338,12 @@ export default function ProspectsPage() {
               <div className="psri-side-card" style={{ marginTop: 16 }}>
                 <div className="psri-side-card-title">History — Calls &amp; Status Changes</div>
                 {activityLoading && <p className="cp-hint">Loading…</p>}
-                {!activityLoading && activity.length === 0 && calls.length === 0 && (
+                {!activityLoading && activity.length === 0 && calls.length === 0 && linkedCases.length === 0 && (
                   <p className="cp-hint">No history yet — nothing logged for this lead.</p>
                 )}
-                {!activityLoading && (activity.length > 0 || calls.length > 0) && (
+                {!activityLoading && (activity.length > 0 || calls.length > 0 || linkedCases.length > 0) && (
                   <div className="psri-side-results">
-                    {buildTimeline(activity, calls, casesByTxn).map(row => (
+                    {buildTimeline(activity, calls, casesByTxn, linkedCases).map(row => (
                       <div key={row.key} className="psri-side-result-item" style={{ cursor: 'default' }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
                           <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>

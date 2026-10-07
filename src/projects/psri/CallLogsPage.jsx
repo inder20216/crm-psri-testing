@@ -127,6 +127,17 @@ export default function CallLogsPage() {
     return false;
   }, [currentUser]);
 
+  // An agent's own call list should only show calls they actually handled —
+  // an inbound call they answered, or an outbound call they dialed (dialing
+  // is their action; whether it connected doesn't change that it's theirs).
+  // Missed/unanswered inbound calls routed to them live in Missed Calls, not
+  // here. Reuses the same disposition classifier as MissedCallsWidget.
+  const isHandled = useCallback((c) => {
+    if (c.direction === 'outbound') return true;
+    const explicitlyMissed = /missed|no.?answer/i.test(c.disposition || '');
+    return !explicitlyMissed && Number(c.durationSeconds) > 0;
+  }, []);
+
   const refresh = useCallback((daysParam) => {
     setLoading(true);
     setLoadErr('');
@@ -186,7 +197,7 @@ export default function CallLogsPage() {
     return calls.filter(c => {
       const started = c.startedAt ? new Date(c.startedAt) : null;
       if (!started || started < start || started > end) return false;
-      if (!isAdmin || scope === 'mine') { if (!isMine(c)) return false; }
+      if (!isAdmin || scope === 'mine') { if (!isMine(c) || !isHandled(c)) return false; }
       if (callType !== 'all' && c.direction !== callType) return false;
       if (effectiveDispositionFilter !== 'all' && c.disposition !== effectiveDispositionFilter) return false;
       if (!q) return true;
@@ -197,7 +208,7 @@ export default function CallLogsPage() {
         statusLabel(c).toLowerCase().includes(q)
       );
     });
-  }, [calls, start, end, query, scope, isAdmin, isMine, callType, effectiveDispositionFilter, nameByNumber]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [calls, start, end, query, scope, isAdmin, isMine, isHandled, callType, effectiveDispositionFilter, nameByNumber]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="psri-page">

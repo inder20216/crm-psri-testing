@@ -34,7 +34,7 @@ const emptyForm = {
   mobileIsd: '+91', mobile: '', altMobileIsd: '+91', altMobile: '', landlineIsd: '+91', landline: '',
   email: '',
   country: 'IN', state: '', city: '',
-  contactType: '', source: '', subSource: '', language: '',
+  contactType: '', source: '', subSource: '', language: 'English',
   assignedTo: '', notes: '',
 };
 

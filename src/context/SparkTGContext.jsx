@@ -82,12 +82,19 @@ export function SparkTGProvider({ children, agentEmail = '' }) {
     iframeRef.current?.contentWindow?.postMessage({ event, data }, '*');
   }, []);
 
-  const dial = useCallback((phone) => {
+  // opts.origin flags a call as belonging to a specific CRM flow rather than
+  // a bare number dial — e.g. 'prospect' (with opts.refId = the prospect id)
+  // tells DialerPanel to skip its own contact-search/auto-navigate-to-Cases
+  // behaviour, since the call is already tied to a known lead.
+  const dial = useCallback((phone, opts = {}) => {
     if (!WIDGET_URL) return;
     const dialPhone = /^\d{10}$/.test(phone) ? `+91${phone}` : phone;
     pendingOutbound.current = true;
     sendToWidget('click_to_call', { phone: dialPhone });
-    setCallState({ phone: normalizePhone(phone), name: '', callId: null, calledTo: '', direction: 'outbound', ended: false });
+    setCallState({
+      phone: normalizePhone(phone), name: '', callId: null, calledTo: '', direction: 'outbound', ended: false,
+      origin: opts.origin || '', refId: opts.refId || '',
+    });
     setWidgetVisible(true);
   }, [sendToWidget]);
 
@@ -157,6 +164,8 @@ export function SparkTGProvider({ children, agentEmail = '' }) {
             calledTo:  calledTo || prev?.calledTo || '',
             direction,
             ended:     false,
+            origin:    prev?.origin || '',
+            refId:     prev?.refId  || '',
           }));
           setWidgetVisible(true);
           if (callId) {
