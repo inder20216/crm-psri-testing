@@ -116,16 +116,20 @@ function prospects_update(array $b): array {
 function prospects_call_attempt(array $b): array {
     $id = trim((string) ($b['id'] ?? ''));
     if ($id === '') return ['error' => 'Prospect id is required'];
-    $agentId   = (string) ($b['agentId'] ?? '');
-    $agentName = (string) ($b['agentName'] ?? '');
+    $agentId    = (string) ($b['agentId'] ?? '');
+    $agentName  = (string) ($b['agentName'] ?? '');
+    $callTxnId  = trim((string) ($b['callTxnId'] ?? ''));
+    $note = $callTxnId !== ''
+        ? "Call placed from Prospects page — txn {$callTxnId}"
+        : 'Call placed from Prospects page';
 
     $pdo = psri_db();
     $pdo->prepare(
         'UPDATE prospects SET attempts = attempts + 1, last_call_at = NOW(), first_call_date = IFNULL(first_call_date, CURDATE()), assigned_to = ? WHERE prospect_id = ?'
     )->execute([$agentId, $id]);
     $pdo->prepare(
-        "INSERT INTO prospect_activity_log (prospect_id, agent_id, agent_name, action, note) VALUES (?, ?, ?, 'call_attempt', 'Call placed from Prospects page')"
-    )->execute([$id, $agentId, $agentName]);
+        "INSERT INTO prospect_activity_log (prospect_id, agent_id, agent_name, action, note) VALUES (?, ?, ?, 'call_attempt', ?)"
+    )->execute([$id, $agentId, $agentName, $note]);
 
     return ['id' => $id, 'message' => 'Call attempt recorded'];
 }

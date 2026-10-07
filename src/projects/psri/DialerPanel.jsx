@@ -69,6 +69,15 @@ export default function DialerPanel() {
       autoNavigated.current = false;
       return;
     }
+    // A call already tied to a known lead (e.g. dialed from the Prospects
+    // page) shouldn't trigger this panel's contact-search / auto-navigate-
+    // to-Cases flow at all — that flow exists for calls nobody has already
+    // identified a reason for.
+    if (callStateRef.current?.origin === 'prospect') {
+      setContact(null); setMatches([]); setRecentCases([]); setNoContact(false);
+      return;
+    }
+
     const cancelledRef = { current: false };
     autoNavigated.current = false;
     setSearching(true);
@@ -99,7 +108,7 @@ export default function DialerPanel() {
     return () => { cancelledRef.current = true; };
   }, [phone]);  // eslint-disable-line react-hooks/exhaustive-deps
 
-  if (!hasWidget || !callState) return null;
+  if (!hasWidget || !callState || callState.origin === 'prospect') return null;
 
   const buildPrefill = (repeatFrom) => ({
     contact:      contact ? { id: contact.id, name: contact.name, mobile: contact.mobile, mobileIsd: contact.mobileIsd || '+91' } : null,
